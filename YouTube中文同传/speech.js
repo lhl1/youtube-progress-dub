@@ -17,21 +17,21 @@
     stop(reason = 'cancel') {
       this.token++; clearTimeout(this.timer); clearTimeout(this.resumeTimer); this.timer = this.resumeTimer = null;
       const previous = this.current; this.current = null;
-      if (previous) { this.synthesis?.cancel(); previous.finish?.(reason); }
+      if (previous) { if(previous.utterance)this.synthesis?.cancel(); previous.finish?.(reason); }
       this.onState(null);
     }
     speak(text, options = {}) {
       this.stop();
-      if (!this.synthesis || !this.Utterance) { this.onError(new Error('浏览器不支持语音朗读')); return; }
+      const parts=options.silent?[{from:0,to:text.length,pause:250}]:DubCore.narrationParts(text);
+      const audible=parts.some(p=>p.text);
+      if (audible && (!this.synthesis || !this.Utterance)) { this.onError(new Error('浏览器不支持语音朗读')); return; }
       const token = this.token;
       const voice = this.voice(options.voice, options.offline);
-      if (!voice) { this.onError(new Error('未发现中文声音，请使用 Edge 并在系统中安装中文语音')); return; }
-      const parts = DubCore.speechParts(text);
-      let offset = 0;
-      const offsets = parts.map(part => { const start = text.indexOf(part, offset); offset = start + part.length; return start + (options.captionOffset || 0); });
+      if (audible && !voice) { this.onError(new Error('未发现中文声音，请使用 Edge 并在系统中安装中文语音')); return; }
+      const offsets=parts.map(part=>part.from+(options.captionOffset||0));
       let index = 0, started = false, retried = false, generation = 0, interrupted = false;
-      const current = {text, captionText: options.captionText || text, options, voice: voice.name, paused: false, startedAt: Date.now(), charIndex: offsets[0] || 0, finish: options.onDone};
-      this.current = current; this.lastVoice = voice.name;
+      const current = {text, captionText: options.captionText || text, options, voice: voice?.name || '', paused: false, startedAt: Date.now(), charIndex: offsets[0] || 0, finish: options.onDone};
+      this.current = current; if(voice)this.lastVoice = voice.name;
       const finish = reason => { if (token !== this.token) return; this.token++; clearTimeout(this.timer); clearTimeout(this.resumeTimer); this.timer = this.resumeTimer = null; this.current = null; this.onState(null); options.onDone?.(reason); };
       const next = () => {
         if (token !== this.token) return;
@@ -40,17 +40,33 @@
         clearTimeout(this.resumeTimer); this.resumeTimer = null;
         const partGeneration = ++generation;
         const valid = () => token === this.token && partGeneration === generation;
-        const utterance = new this.Utterance(parts[index]);
-        current.utterance = utterance; utterance.voice = voice; utterance.lang = voice.lang || 'zh-CN';
         current.partStart = current.charIndex = offsets[index];
-        current.partEnd = offsets[index] + parts[index].length;
+        current.partEnd = parts[index].to+(options.captionOffset||0);
         current.hasBoundary = false; current.progressStarted = false; current.pausedAt = null;
+        const advance=()=>{
+          if(!valid())return;
+          generation++;clearTimeout(this.timer);clearTimeout(this.resumeTimer);this.timer=this.resumeTimer=null;
+          current.charIndex=current.partEnd;current.progressStarted=false;current.utterance=null;current.resume=next;current.recoverResume=false;
+          index++;retried=false;interrupted=false;next();
+        };
+        if(parts[index].pause){
+          current.utterance=null;current.recoverResume=false;
+          current.timerRemaining=DubCore.clamp(parts[index].pause/(options.rate||1),80,400);
+          current.resume=()=>{
+            if(!valid()||current.paused)return;
+            current.timerStartedAt=Date.now();clearTimeout(this.timer);
+            this.timer=setTimeout(advance,current.timerRemaining);
+          };
+          this.onState(current);current.resume();return;
+        }
+        const utterance = new this.Utterance(parts[index].text);
+        current.utterance = utterance; utterance.voice = voice; utterance.lang = voice.lang || 'zh-CN';
         utterance.rate = DubCore.clamp(options.rate || 1, 0.1, 10); utterance.volume = options.volume ?? 1;
         started = false;
         const startTimer = () => {
           clearTimeout(this.timer);
           if (current.paused || !valid()) return;
-          const deadline = Math.max(8000, parts[index].length / (3.5 * utterance.rate) * 1000 + 6000);
+          const deadline = Math.max(8000, parts[index].text.length / (3.5 * utterance.rate) * 1000 + 6000);
           current.timerStartedAt = Date.now();
           current.timerRemaining ??= started ? deadline : 7000;
           this.timer = setTimeout(() => {
@@ -100,16 +116,10 @@
           // A voice that reports only an initial sentence boundary at zero
           // still needs the visual-clock fallback until real progress arrives.
           current.hasBoundary ||= e.charIndex > 0;
-          current.charIndex = Math.max(current.charIndex, current.partStart + DubCore.clamp(e.charIndex, 0, parts[index].length - 1));
+          current.charIndex = Math.max(current.charIndex, current.partStart + DubCore.clamp(e.charIndex, 0, parts[index].text.length - 1));
           this.onState(current);
         };
-        utterance.onend = () => {
-          if (!valid()) return;
-          generation++; clearTimeout(this.timer); clearTimeout(this.resumeTimer);
-          current.charIndex = current.partEnd; current.progressStarted = false;
-          current.utterance = null; current.resume = next; current.recoverResume = false;
-          index++; retried = false; interrupted = false; next();
-        };
+        utterance.onend = advance;
         utterance.onerror = e => {
           if (!valid()) return;
           if (['canceled', 'interrupted'].includes(e.error)) {
@@ -163,7 +173,7 @@
         const current = this.current; current.paused = true; current.pausedAt = Date.now();
         if (this.timer) current.timerRemaining = Math.max(1, current.timerRemaining - (Date.now() - current.timerStartedAt));
         clearTimeout(this.timer); clearTimeout(this.resumeTimer); this.timer = this.resumeTimer = null;
-        this.synthesis.pause(); this.onState(current);
+        if(current.utterance)this.synthesis?.pause(); this.onState(current);
       }
     }
     resume() {

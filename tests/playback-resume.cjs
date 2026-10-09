@@ -53,11 +53,15 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{back
     // A real native voice probe uses the same release engine, with silent output.
     const nativePage=await context.newPage();await nativePage.goto(`chrome-extension://${id}/options.html`);
     await nativePage.waitForFunction(()=>speechSynthesis.getVoices().some(v=>/^zh-CN/i.test(v.lang)));
-    await nativePage.locator('#volume').fill('0');await nativePage.locator('#testVoice').click();await nativePage.evaluate(()=>engine.stop());
+    await nativePage.locator('#volume').fill('0');await nativePage.locator('#testVoice').click();
+    // Wait for warm-up and cancellation to settle before the native probe.
+    await nativePage.waitForFunction(()=>!!engine.current);await nativePage.evaluate(()=>engine.stop());
+    await nativePage.waitForFunction(()=>!speechSynthesis.speaking&&!speechSynthesis.pending);
     const native=await nativePage.evaluate(()=>new Promise(resolve=>{
-      const utterances=[],nativeSpeak=speechSynthesis.speak.bind(speechSynthesis);let pauses=0,armed=false;
+      const utterances=[],voiceErrors=[],oldError=engine.onError,nativeSpeak=speechSynthesis.speak.bind(speechSynthesis);let pauses=0,armed=false;
+      engine.onError=e=>voiceErrors.push(e.message);
       speechSynthesis.speak=u=>{utterances.push(u.text);nativeSpeak(u)};
-      const finish=reason=>{clearTimeout(deadline);speechSynthesis.speak=nativeSpeak;resolve({reason,voice:engine.lastVoice,utterances,pauses})};
+      const finish=reason=>{clearTimeout(deadline);speechSynthesis.speak=nativeSpeak;engine.onError=oldError;resolve({reason,voice:engine.lastVoice,utterances,pauses,voiceErrors})};
       const deadline=setTimeout(()=>{engine.stop();finish('timeout')},30000);
       engine.speak('第一句已经完整读完。接下来这一句用来检查暂停以后继续朗读，保留前面已经读完的内容并顺利完成。',{
         volume:0,rate:1.5,onStart:()=>{
@@ -66,7 +70,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{back
         },onDone:r=>{if(r!=='cancel')finish(r)}
       });
     }));
-    assert.equal(native.reason,'end');assert.equal(native.pauses,2);assert.equal(native.utterances.filter(s=>s==='第一句已经完整读完。').length,1);
+    assert.equal(native.reason,'end',JSON.stringify(native));assert.equal(native.pauses,2);assert.equal(native.utterances.filter(s=>s==='第一句已经完整读完。').length,1);
     pass('Actual Edge Chinese synthesis finishes after two pause/resume cycles, without replaying the completed sentence (muted)');
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(root,'dist/playback-resume-report.json'),JSON.stringify({actualExtensionLoaded:true,fixture:true,transportVoiceSubstituted:true,checks,native,errors},null,2));

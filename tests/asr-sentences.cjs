@@ -57,15 +57,17 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
     assert.equal((await status()).queued,4);
     const displays=[];
     for(let i=0;i<4;i++){
-      await until(async()=>await run('__asr.spoken.length')===i+1);
+      await until(async()=>await run(`__asr.engine.current?.options.cue?.text === ${JSON.stringify(sample.sentences[i])}`));
       const display=await ui(function(){const sub=this.querySelector('.sub');return {chinese:sub.querySelector('.chinese').textContent,source:sub.querySelector('.source span').textContent,height:sub.getBoundingClientRect().height}});
       assert.equal(display.chinese,sample.chinese[i]);assert.equal(display.source,sample.sentences[i]);assert.ok(display.height<150);
       displays.push(display);
       if(i===1)await page.screenshot({path:path.join(root,'dist/无标点字幕-分句预览.png')});
-      await run('__asr.last.onend()');
+      while(await run(`__asr.engine.current?.options.cue?.text === ${JSON.stringify(sample.sentences[i])}`)){
+        if(await run('__asr.engine.current?.utterance'))await run('__asr.last.onend()');else await page.waitForTimeout(20);
+      }
     }
     await until(async()=>(await status()).queued===0);
-    assert.deepEqual(await run('__asr.spoken'),sample.chinese);assert.equal(await run('__asr.cancel'),0);assert.equal(await run('__asr.videoCalls'),0);
+    assert.equal((await run('__asr.spoken')).join(''),sample.chinese.join('').replace(/[“”《》]/g,''));assert.equal(await run('__asr.cancel'),0);assert.equal(await run('__asr.videoCalls'),0);
     pass('Complete reading shows and speaks each full unit in order without dropped text, cut-off speech or pausing the video');
     // Observe the real translation service separately from deterministic checks.
     const liveTranslation=await worker.evaluate(async sentences=>{

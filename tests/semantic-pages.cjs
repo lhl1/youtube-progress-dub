@@ -62,6 +62,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
       const text=sample.chinese[i],seen=[],metrics=[];
       let parts=0;
       while(await run(`__asr.engine.current?.options.cue?.text === ${JSON.stringify(sample.sentences[i])}`)) {
+        if(await run('!__asr.engine.current?.utterance')){await page.waitForTimeout(20);continue;}
         const length=await run('__asr.last.text.length');
         for(let at=0;at<length;at++) {
           await run(`__asr.last.onboundary({charIndex:${at}})`);
@@ -84,7 +85,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
       displays.push({source:sample.sentences[i],pages:metrics,utterances:parts});
     }
     await until(async()=>(await status()).queued===0);
-    assert.equal((await run('__asr.spoken')).join(''),sample.chinese.join(''));assert.ok(await run('__asr.spoken.length')>6);assert.equal(await run('__asr.cancel'),0);assert.equal(await run('__asr.videoCalls'),0);
+    assert.equal((await run('__asr.spoken')).join(''),sample.chinese.join('').replace(/[“”《》]/g,''));assert.ok(await run('__asr.spoken.length')>6);assert.equal(await run('__asr.cancel'),0);assert.equal(await run('__asr.videoCalls'),0);
     pass('Long sentence pages follow native word progress, freeze on pause and retain every character while complete speech runs in order without dropped text, cut-off speech or pausing the video');
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(root,'dist/semantic-pages-report.json'),JSON.stringify({version:JSON.parse(fs.readFileSync(path.join(extension,'manifest.json'))).version,actualExtensionLoaded:true,fixture:true,voiceSubstituted:true,checks,captionRequests,translationRequests:await worker.evaluate(()=>__asrRequests),displays,errors},null,2));

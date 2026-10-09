@@ -55,3 +55,7 @@ node tools/evaluate-asr.cjs
 ```
 
 默认仅检查公开样例的分段和完整性，不访问翻译服务。加 `--live` 可观察真实 Google 翻译；Windows 上加 `--edge` 使用已安装 Edge 的网络环境。`--baseline <旧版core.js>` 可做前后边界对比。工具输出到 `dist/asr-redesign-report.json`；结果是观察记录，不是自动质量分数。
+
+## 音效过滤验证
+
+`npm run test:speech-filter` 在 Windows Edge 中加载实际扩展，用可控语音设备检查纯标记静默、混合内容停顿、字幕文字与字符偏移保持，以及暂停后继续和视频倍速联动。真实声音的可用性需单独验证，不能把替代设备的输出当作真人听感测评。

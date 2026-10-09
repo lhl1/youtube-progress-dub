@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.1 — 2026-10-09
+
+- Skip square-bracket annotations, full-width variants, symbols and complete emoji graphemes during narration, using short silent pauses while preserving caption text and original character offsets.
+- Complete annotation-only source cues silently even if translation removes their brackets; no voice or gesture is required for silent parts.
+- Freeze remaining silence on pause, preserve video-relative rate for following speech, and cancel stale timers on stop or seek.
+- Ask custom translators to retain brackets around sound/stage annotations.
+- Add 7 regression tests (121 total) and an Edge annotation integration scenario; native caption and ASR pagination fixtures remain covered.
+
 ## 1.7.0 — 2026-10-09
 
 - Improve ASR translation units to retain direct objects, complements, conditions, causes and the scope of reported speech, including short hesitations before a continuation.

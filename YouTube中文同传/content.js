@@ -187,6 +187,7 @@
     speechRetryAt = Date.now() + 5000;
     speech.speak(translated, {
       voice: settings.voice, volume: settings.volume, rate, cue, cueEnd: cue.end + 1,
+      silent: !C.narrationParts(cue.text).some(part=>part.text),
       onStart: () => { if (token === sessionToken && vid === video) duckVolume(); },
       onDone: reason => {
         if (token !== sessionToken || vid !== video || reason === 'cancel') return;

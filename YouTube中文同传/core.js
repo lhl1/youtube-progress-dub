@@ -356,6 +356,50 @@
     }
     return parts;
   }
+  function narrationParts(text, maxLength = 140) {
+    text=String(text||'');const plan=[];
+    const emoji=new Map(typeof Intl.Segmenter==='function'?[...new Intl.Segmenter('und',{granularity:'grapheme'}).segment(text)].filter(g=>/[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u.test(g.segment)).map(g=>[g.index,g.index+g.segment.length]):[]);
+    const pause=(from,to)=>{
+      if(to<=from)return;
+      const last=plan.at(-1);
+      if(last?.pause && !text.slice(last.to,from).trim())last.to=to;
+      else plan.push({from,to,pause:250});
+    };
+    const speak=(from,to)=>{
+      const source=text.slice(from,to);let offset=0;
+      for(const part of speechParts(source,maxLength)){
+        const start=source.indexOf(part,offset);offset=start+part.length;
+        if(/[\p{L}\p{N}]/u.test(part))plan.push({text:part,from:from+start,to:from+offset});
+        else pause(from+start,from+offset);
+      }
+    };
+    const brackets=new Map([['[',']'],['［','］'],['【','】']]);
+    let from=0,index=0;
+    while(index<text.length){
+      const char=String.fromCodePoint(text.codePointAt(index));
+      if(emoji.has(index)){
+        speak(from,index);pause(index,emoji.get(index));index=emoji.get(index);from=index;continue;
+      }
+      if(brackets.has(char)){
+        speak(from,index);const start=index,stack=[brackets.get(char)];index+=char.length;
+        while(index<text.length&&stack.length){
+          const c=String.fromCodePoint(text.codePointAt(index));
+          if(brackets.has(c))stack.push(brackets.get(c));else if(c===stack.at(-1))stack.pop();
+          index+=c.length;
+        }
+        pause(start,index);from=index;continue;
+      }
+      // Sentence punctuation is kept for prosody, never spoken in isolation.
+      // Apostrophes inside words are lexical (can't), not symbol annotations.
+      const apostrophe=/['’]/.test(char)&&/\p{L}/u.test(text[index-1]||'')&&/\p{L}/u.test(text[index+1]||'');
+      if(/[\p{P}\p{S}\u200d\ufe0e\ufe0f]/u.test(char)&&!/[。！？!?，,、；;：:….]/.test(char)&&!apostrophe){
+        speak(from,index);pause(index,index+char.length);index+=char.length;from=index;
+      }else index+=char.length;
+    }
+    speak(from,text.length);
+    if(!plan.length&&text.length)pause(0,text.length);
+    return plan;
+  }
   function isAutomaticTrack(track, url = '') {
     if (track?.kind === 'asr' || track?.vssId?.startsWith('a.')) return true;
     try { return new URL(url || track?.baseUrl).searchParams.get('kind') === 'asr'; } catch { return false; }
@@ -638,7 +682,7 @@
       return Math.max(0, last - position);
     }
   }
-  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
+  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
   root.DubCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);
