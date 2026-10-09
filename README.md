@@ -1,93 +1,70 @@
-# YouTube 中文同传 · 随播随译
+<div align="center">
+
+# YouTube 中文同传
+
+看 YouTube，听中文。把视频字幕翻译成中文，再用 Edge 中文声音读出来。
+
+[下载插件](https://github.com/lhl1/youtube-progress-dub/releases/latest) · [使用指南](docs/usage.md) · [反馈问题](https://github.com/lhl1/youtube-progress-dub/issues)
 
 [![CI](https://github.com/lhl1/youtube-progress-dub/actions/workflows/ci.yml/badge.svg)](https://github.com/lhl1/youtube-progress-dub/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-将 YouTube 字幕翻译为中文，调用 Microsoft Edge 提供的中文语音，按播放进度持续朗读。支持长视频、跳转、缓存、字幕外观设置，以及完整朗读模式。Manifest V3，主要面向桌面版 Edge。
+</div>
 
-**只有明确标记为自动生成（ASR）的字幕才做语义分段和长句显示分页。人工／原生字幕保留原条目文字和时间边界，不合并、不拆分；经过自动翻译也不会变成 ASR。**
+适用于电脑端 Microsoft Edge。视频需要有字幕，自动生成的字幕也可以用。
+
+## 三步开始
+
+1. [下载安装包](https://github.com/lhl1/youtube-progress-dub/releases/latest)，选择 ZIP，解压到一个长期保留的文件夹。
+2. 在 Edge 地址栏输入 `edge://extensions`，打开“开发人员模式”，点击“加载解压缩的扩展”，选择解压后的文件夹。
+3. 刷新 YouTube 页面，点击播放器齿轮旁的白色“中文同传”图标，试听声音即可开始。
+
+选择的文件夹里应直接有 `manifest.json`。第一次没有声音时，点击一下视频中的按钮。
+
+## 用起来是什么样？
+
+| 功能 | 你能得到什么 |
+| --- | --- |
+| 中文朗读 | 一句读完再读下一句，视频照常播放。来不及读时，中文会稍微落后。 |
+| 跟随倍速 | 视频加速，中文朗读也跟着加速。 |
+| 原声更轻 | 开启后持续降低原声音量，句子之间不会忽大忽小。 |
+| 双语字幕 | 中文和原文一起看，字体、大小、颜色、位置都能调。 |
+| 自动开启 | 设置一次，以后打开视频就自动开启同传。 |
+| 长视频支持 | 随播放进度继续准备翻译，拖动进度后从新位置开始。 |
+
+默认已设好：完整朗读、晓晓声音、基础语速 1.30 倍、原声上限 25%，同时显示中文和原文。
 
 ## 界面预览
 
-通过播放器控制栏的白色“中文同传”图标打开设置。点击图片可查看原图。
+常用设置都在播放器里完成。点击图片可查看原图。
 
-| 同传与音量 | 字幕样式与预览 | 双语与字幕同步 |
+| 朗读与音量 | 字幕外观 | 双语与同步 |
 | --- | --- | --- |
-| [<img src="docs/images/player-settings.png" alt="同传设置：字幕来源、自动开启、中文声音、完整朗读、基础语速与全程原声音量上限" width="280">](docs/images/player-settings.png) | [<img src="docs/images/subtitle-style.png" alt="字幕样式设置：中英文显示、快捷样式、实时预览、字体、字号、颜色与文字边缘" width="280">](docs/images/subtitle-style.png) | [<img src="docs/images/subtitle-sync.png" alt="双语与字幕同步设置：原文大小和颜色、双语间距、字幕跟随、时间偏移与隐藏 YouTube 原字幕" width="280">](docs/images/subtitle-sync.png) |
+| [<img src="docs/images/player-settings.png" alt="朗读与音量设置" width="260">](docs/images/player-settings.png) | [<img src="docs/images/subtitle-style.png" alt="字幕外观与实时预览" width="260">](docs/images/subtitle-style.png) | [<img src="docs/images/subtitle-sync.png" alt="双语与字幕同步设置" width="260">](docs/images/subtitle-sync.png) |
 
-## 安装与更新
+## 常见问题
 
-1. 从 [Releases](https://github.com/lhl1/youtube-progress-dub/releases/latest) 下载扩展 ZIP，解压到长期保留的文件夹。
-2. 打开 `edge://extensions`，开启“开发人员模式”，点击“加载解压缩的扩展”，选择直接包含 `manifest.json` 的文件夹。
-3. 刷新 YouTube 页面，点击视频控制栏齿轮附近的“中文同传”图标。在面板内试听声音和调整设置。
+<details>
+<summary>中文没声音，怎么办？</summary>
 
-也可克隆仓库，直接加载 `YouTube中文同传/` 文件夹，已包含本地词性模型。更新时覆盖扩展文件，在扩展管理页重新加载，然后刷新视频页面。已有个人设置会保留；点击“恢复推荐设置”应用默认配置。
+点击播放器里的“中文同传”图标，先“试听声音”，再试“恢复 / 重试”。也可以换一种中文声音，并检查 Edge 和系统是否静音。刚更新插件后，需要刷新视频页面。
 
-Releases 同时提供 CRX3 和 SHA-256 校验文件。浏览器可能限制非商店 CRX 安装，推荐使用解压文件夹方式。无需修改注册表或浏览器安全策略。此项目未发布到扩展商店。
+</details>
 
-## 主要功能
+<details>
+<summary>会不会把字幕拆得很碎？</summary>
 
-- **随进度翻译：**动态预读、请求超时、限流退避与缓存；跳转后优先准备当前位置。完整朗读优先准备尚未读完的句子，支持长视频。
-- **完整朗读（默认）：**逐句完整读完，再读下一句，视频继续播放。读不完时允许中文落后；视频结束后继续读完队列。手动跳转、换视频或停止时清除旧队列。
-- **语速随视频倍速变化：**基础倍率 × 视频倍速，例如 1.30 × 2.00 = 2.60；从下一朗读片段生效，保留队列。
-- **原声全程音量上限：**同传期间持续限制原声，句间不恢复大音量；停止后恢复。不会把原本较小的音量调高。
-- **播放器内设置：**声音、字幕来源、自动开启、语速、音量、模式及字幕样式；点击外部或 YouTube 其他按钮自动收起，支持全屏。
-- **字幕样式：**字体、大小、颜色、边缘、透明度、背景、位置、宽度、行距、双语顺序、时间偏移及原字幕隐藏。
-- **自动生成英语字幕：**本地词性模型与规则寻找主谓、从句及句界，保留依存关系；长句分页只改变显示，不截断朗读、不丢文字。
-- **翻译服务：**默认 Google 翻译，也支持自定义 OpenAI 兼容的 Chat Completions 接口。
+只对 YouTube 自动生成的字幕尝试按意思分段，让长字幕更容易读。人工制作的原生字幕保留原来的每条文字和时间，不合并、不拆分。自动生成字幕可能缺词或缺少标点，分段和翻译仍可能有误差。
 
-默认：自动选择字幕、打开视频自动开启、晓晓自然声音、完整朗读、基础语速 1.30×、中文音量 100%、原声上限 25%、中文与原文均显示。字幕大小 75%、白色非粗体、阴影、底部居中、边距 2%、宽度 86%、透明背景、行距 1.50×；显示同传字幕时隐藏 YouTube 原字幕。
+</details>
 
-第一次启动语音可能需要点击视频里的按钮，浏览器会限制无用户手势的语音播放。设备没有晓晓声音时使用可用的备用中文声音；可在面板中手动更换。
+<details>
+<summary>字幕和设置会发到哪里？</summary>
 
-## 工作方式与限制
+设置与翻译缓存保存在本机。需要翻译的字幕会发给 Google，或你自己配置的翻译服务；Edge 在线声音由浏览器提供。详见[隐私说明](docs/privacy.md)。
 
-字幕 → ASR 专用语义分段（原生字幕保持原条目）→ 翻译缓存与调度 → 朗读队列 → 中文字幕。
+</details>
 
-语音通过网页 `speechSynthesis` 使用浏览器暴露的声音，不需要单独部署配音服务器。Edge 在线自然声音的可用性取决于系统、浏览器和网络。本项目不会抓取 Microsoft 私有语音服务，也不会下载视频或获取无字幕视频的音轨。
+---
 
-这是基于字幕的同传，无法保证逐词／口型同步。无标点字幕的分句使用本地词性模型和规则，不能保证复杂句、口误或缺词都被准确还原。翻译服务、字幕获取与在线声音也可能受到网络限制。完整模式不主动暂停视频；跟随模式可能为追赶视频而截断超时朗读。
-
-## 隐私与权限
-
-- 设置和译文缓存保存在本机浏览器扩展存储中；本项目没有自建遥测或账号系统。
-- 使用 Google 翻译时，非中文字幕文本会发送到 Google；配置自定义服务时发送到所选服务。Edge 在线声音可能由浏览器在线合成，适用相应服务的隐私规则。
-- 自定义密钥只保存在本机扩展设置中，并发送给所配置的服务；不要把密钥提交到 GitHub。
-- `storage` 保存设置与缓存，`webRequest` 观察 YouTube 字幕请求，`activeTab` 操作当前视频。固定域名权限用于 YouTube 和默认翻译服务；自定义接口在配置时申请相应的可选域名权限。
-- 仓库不包含签名私钥、本机备份、个人账号信息、私人录屏或参考插件安装包。
-
-## 开发
-
-使用 Node.js 24 和 Python 3。从仓库根目录执行：
-
-```sh
-npm ci
-npm run build:syntax
-npm test
-```
-
-单元测试覆盖字幕分类、原生条目边界、ASR 分句、字幕分页、朗读队列、暂停恢复、倍速与音量等行为。`npm test` 不访问 YouTube。
-
-浏览器集成检查使用 Playwright 和 Windows 桌面版 Edge，具体入口在 `package.json`，例如 `npm run test:native-boundaries`。部分检查使用本地模拟视频页面、静音朗读或真实 Edge 声音，需要已安装 Edge 和相应中文声音；并非所有平台都可直接运行。
-
-```sh
-npm run backup
-npm run pack
-```
-
-修改或打包前先运行备份，确认 SHA-256 校验成功。安装包输出到 `dist/`，不要覆盖需要保留的旧版本。
-
-首次自行签名会在 `tools/local-signing-key.pem` 生成私钥，并将公钥写入扩展清单；私钥已被 `.gitignore` 排除。自行生成新密钥会得到不同的扩展 ID，不具备原发布者的更新身份。发布者可通过环境变量 `DUB_SIGNING_KEY` 指定仓库外的现有私钥路径；请妥善离线备份私钥，绝不上传。
-
-## 结构
-
-- `YouTube中文同传/`：可直接加载的扩展，包含离线英语词性模型与第三方许可证。
-- `tests/`：单元测试、浏览器集成测试与本地测试页面。
-- `tools/`：备份、模型构建、签名、打包和验证工具。
-- `.github/workflows/ci.yml`：构建与单元测试持续集成。
-
-欢迎通过 [Issues](https://github.com/lhl1/youtube-progress-dub/issues) 报告问题。请提供浏览器版本、扩展版本、字幕类型、播放倍速与复现步骤；日志中先移除密钥与个人信息。
-
-## 许可证
-
-原创代码采用 [MIT](LICENSE)。第三方组件按各自许可证使用，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[更多使用说明](docs/usage.md) · [开发与打包](docs/development.md) · [MIT 许可证](LICENSE) · [第三方组件](THIRD_PARTY_NOTICES.md)
