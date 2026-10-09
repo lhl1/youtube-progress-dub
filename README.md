@@ -7,6 +7,14 @@
 
 **只有明确标记为自动生成（ASR）的字幕才做语义分段和长句显示分页。人工／原生字幕保留原条目文字和时间边界，不合并、不拆分；经过自动翻译也不会变成 ASR。**
 
+## 界面预览
+
+通过播放器控制栏的白色“中文同传”图标打开设置。点击图片可查看原图。
+
+| 同传与音量 | 字幕样式与预览 | 双语与字幕同步 |
+| --- | --- | --- |
+| [<img src="docs/images/player-settings.png" alt="同传设置：字幕来源、自动开启、中文声音、完整朗读、基础语速与全程原声音量上限" width="280">](docs/images/player-settings.png) | [<img src="docs/images/subtitle-style.png" alt="字幕样式设置：中英文显示、快捷样式、实时预览、字体、字号、颜色与文字边缘" width="280">](docs/images/subtitle-style.png) | [<img src="docs/images/subtitle-sync.png" alt="双语与字幕同步设置：原文大小和颜色、双语间距、字幕跟随、时间偏移与隐藏 YouTube 原字幕" width="280">](docs/images/subtitle-sync.png) |
+
 ## 安装与更新
 
 1. 从 [Releases](https://github.com/lhl1/youtube-progress-dub/releases/latest) 下载扩展 ZIP，解压到长期保留的文件夹。
