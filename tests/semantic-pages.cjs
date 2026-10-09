@@ -24,7 +24,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
       const native=fetch;globalThis.__nativeFetch=native;globalThis.__asrRequests=[];
       globalThis.fetch=async(u,o)=>{
         if(String(u).startsWith('https://translate.googleapis.com/')){
-          const text=new URL(u).searchParams.get('q'),i=sample.sentences.indexOf(text);__asrRequests.push(text);
+          const text=new URL(u).searchParams.get('q'),i=sample.sentences.findIndex(s=>DubCore.translationInput({text:s,automatic:true},'en')===text);__asrRequests.push(text);
           if(i<0)throw new Error('Fragmented ASR translation request: '+text);
           return new Response(JSON.stringify([[[sample.chinese[i],text]]]),{headers:{'Content-Type':'application/json'}});
         }
@@ -49,7 +49,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
       {const speak=DubSpeech.prototype.speak;const synthesis={paused:false,getVoices:()=>[{name:'Test Chinese',lang:'zh-CN',localService:true}],cancel(){__asr.cancel++},pause(){},resume(){},speak(u){__asr.last=u;__asr.spoken.push(u.text);u.onstart()}};DubSpeech.prototype.speak=function(t,o){this.synthesis=synthesis;this.Utterance=class{constructor(t){this.text=t}};__asr.engine=this;return speak.call(this,t,o)}}`);
     await worker.evaluate(async()=>{const t=(await chrome.tabs.query({url:'https://www.youtube.com/*'}))[0];await chrome.tabs.sendMessage(t.id,{type:'TOGGLE'})});
     await until(async()=>(await status()).cached===6);
-    assert.deepEqual(await worker.evaluate(()=>__asrRequests),sample.sentences);
+    assert.deepEqual(await worker.evaluate(()=>__asrRequests),await worker.evaluate(sentences=>sentences.map(text=>DubCore.translationInput({text,automatic:true},'en')),sample.sentences));
     assert.ok(captionRequests.length);assert.ok(captionRequests.every(u=>!new URL(u).searchParams.has('tlang')));
     pass('English ASR is grouped before translation even with YouTube auto-translation preference enabled');
     assert.equal((await status()).cues,6);

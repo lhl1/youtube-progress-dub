@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube 中文同传 · 随播随译",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "按 YouTube 播放进度准备中文字幕并调用 Edge 中文语音朗读，支持长视频、跳转、重试和本地缓存。",
   "minimum_chrome_version": "120",
   "permissions": [

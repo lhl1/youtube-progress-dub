@@ -130,13 +130,13 @@ test('live unpunctuated ASR emits stable finished units and holds the unfinished
   assert.equal(first[0].id,expanded[0].id);
 });
 
-test('long unpunctuated ASR is bounded to sixteen seconds and keeps every word in sequence', () => {
+test('repeated complete ASR clauses keep every word in sequence with stable versioned cache keys', () => {
   const text=('we remember these moments because they matter to us until you see the pictures again ').repeat(28).trim();
   const groups=C.groupCues([{start:0,end:160,text}],{language:'en'});
   assert.equal(groups.map(c=>c.text).join(' '),text);
   assert.ok(groups.every(c=>c.text.length<=320&&c.end-c.start<=16.01));
   assert.ok(groups.every(c=>!/(?:until|because|the|real)$/.test(c.text)));
-  assert.match(C.cacheKey(groups[0],'en',C.defaults),/^sentence-v5:/);
+  assert.match(C.cacheKey(groups[0],'en',C.defaults),/^meaning-v6:asr:/);
 });
 
 test('Chinese line joins do not insert unnatural spaces and do not drop characters', () => {

@@ -16,7 +16,7 @@
     translate: requestTranslation,
     onResult: (cue, text) => {
       const key = C.cacheKey(cue, sourceLang, settings);
-      cacheRows[key] = {source: cue.text, text}; dirtyCache[key] = cacheRows[key];
+      cacheRows[key] = {source: cue.text, text, ...(cue.automatic?{alignment:C.validatedAlignment(cue.alignment,cue.text,text)}:{})}; dirtyCache[key] = cacheRows[key];
       if (Object.keys(cacheRows).length > 1200) cacheRows = Object.fromEntries(Object.entries(cacheRows).slice(-1100));
       if (!cacheTimer) cacheTimer = setTimeout(flushCache, 2000);
       tick();
@@ -41,14 +41,15 @@
   }
   async function requestTranslation(cue, lang, signal) {
     const key = C.cacheKey(cue, lang, settings), cached = cacheRows[key];
-    if (cached?.source === cue.text) return cached.text;
+    if (cached?.source === cue.text) { cue.alignment=C.validatedAlignment(cached.alignment,cue.text,cached.text); return cached.text; }
     const requestId = crypto.randomUUID();
     const cancel = () => rpc({type: 'CANCEL', requestId}, 3000).catch(() => {});
     signal.addEventListener('abort', cancel, {once: true});
     try {
       if (signal.aborted) throw new DOMException('取消', 'AbortError');
-      const r = await rpc({type: 'TRANSLATE', requestId, text: cue.text, language: lang});
+      const r = await rpc({type: 'TRANSLATE', requestId, text: C.translationInput(cue,lang), language: lang, ...(cue.automatic?{automatic:true,sourceText:cue.text,contextBefore:cue.contextBefore,contextAfter:cue.contextAfter}:{})});
       if (signal.aborted) throw new DOMException('取消', 'AbortError');
+      if(cue.automatic)cue.alignment=C.validatedAlignment(r.alignment,cue.text,r.text);
       return r.text;
     } finally { signal.removeEventListener('abort', cancel); }
   }
@@ -84,11 +85,19 @@
       scheduler.cues = [...old.values()].sort((a, b) => a.start - b.start).slice(-5000);
     } else {
       sourceLang = lang; sourceName = name;
-      scheduler.setCues(C.prepareCues(rows, {live: isLive, language: lang, automatic}), lang, translated);
-      scheduler.enabled = active;
-      for (const cue of scheduler.cues) {
-        const cached = cacheRows[C.cacheKey(cue, lang, settings)];
-        if (cached?.source === cue.text) scheduler.put(cue, cached.text);
+      const prepared=C.prepareCues(rows,{live:isLive,language:lang,automatic});
+      const same=sourceAutomatic===automatic && scheduler.lang===lang && scheduler.translated===translated && prepared.length===scheduler.cues.length && prepared.every((c,i)=>{
+        const old=scheduler.cues[i];return c.id===old.id && c.text===old.text && c.start===old.start && c.end===old.end;
+      });
+      // The page fetch and network capture can deliver the same transcript.
+      // Preserve its in-flight translation and voice instead of reinstalling.
+      if(!same) {
+        scheduler.setCues(prepared,lang,translated);
+        scheduler.enabled = active;
+        for (const cue of scheduler.cues) {
+          const cached = cacheRows[C.cacheKey(cue, lang, settings)];
+          if (cached?.source === cue.text) { cue.alignment=C.validatedAlignment(cached.alignment,cue.text,cached.text); scheduler.put(cue, cached.text); }
+        }
       }
     }
     sourceAutomatic = automatic; sourceName = name; captionFailures = 0; retryAt = 0; errorText = ''; lastCaptionRefresh = Date.now(); renderTracks(); tick();
@@ -279,7 +288,7 @@
     cacheRows = cached;
     for (const cue of scheduler.cues) {
       const cached = cacheRows[C.cacheKey(cue, sourceLang, settings)];
-      if (cached?.source === cue.text) scheduler.put(cue, cached.text);
+      if (cached?.source === cue.text) { cue.alignment=C.validatedAlignment(cached.alignment,cue.text,cached.text); scheduler.put(cue, cached.text); }
     }
     if (lastCapturedBody) capturedBody(lastCapturedBody.url, lastCapturedBody.body);
     loadCaptions().catch(e => report(e.message)); tick();
@@ -420,7 +429,7 @@
     const translated = cue && scheduler.get(cue);
     const captionProgress = !cue ? 0 : settings.subtitleTiming === 'speech' ? (speech.current?.options.cue?.id === cue.id ? speech.progress() : 0) : C.clamp((pos + settings.subtitleOffset - cue.start) / Math.max(.01, cue.end - cue.start), 0, 1) * (translated?.length || 0);
     const queueStatus = complete ? `视频照常播放 · 待读 ${narration.pending.length} 句${head ? ` · 落后约 ${Math.max(0, Math.round(pos - head.start))} 秒` : ''}${head && !scheduler.get(head) ? ' · 等待本句翻译' : ''}` : '';
-    view.render({active, status: text, queueStatus, playbackRate: video?.playbackRate || 1, effectiveRate: speech.current?.options.rate ?? C.speechRate(settings, video?.playbackRate || 1), error: voiceNeedsGesture ? '浏览器需要一次页面点击才能朗读，点击视频后将继续。' : errorUntil > Date.now() ? errorText : '', translated, source: cue?.text, captionProgress, paginate: cue?.automatic === true});
+    view.render({active, status: text, queueStatus, playbackRate: video?.playbackRate || 1, effectiveRate: speech.current?.options.rate ?? C.speechRate(settings, video?.playbackRate || 1), error: voiceNeedsGesture ? '浏览器需要一次页面点击才能朗读，点击视频后将继续。' : errorUntil > Date.now() ? errorText : '', translated, source: cue?.text, captionProgress, alignment:cue?.alignment, paginate: cue?.automatic === true});
   }
   function discover() {
     const id = C.videoId(location.href);

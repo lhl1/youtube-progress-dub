@@ -28,6 +28,41 @@ test('background translation is bounded and validates the service response', asy
   const bad = harness({}, async () => new Response('{}')); assert.equal((await bad.rpc({type: 'TRANSLATE', requestId: '2', text: 'a'})).ok, false);
 });
 
+test('ASR retains real Google sentence pairs for bilingual pages, while native captions keep the plain response',async()=>{
+  const source='A much longer first sentence about the old photo. A reply',first='A much longer first sentence about the old photo. ',last='A reply.';
+  let query;
+  const h=harness({},async url=>{query=new URL(url).searchParams.get('q');return new Response(JSON.stringify([[['前半句。',first],['回应。',last]]]));});
+  const r=await h.rpc({type:'TRANSLATE',requestId:'asr-pairs',text:source+'.',sourceText:source,automatic:true,language:'en'});
+  assert.equal(query,source+'.');assert.equal(r.data.text,'前半句。回应。');
+  assert.deepEqual(JSON.parse(JSON.stringify(r.data.alignment)),[{from:0,to:4,sourceFrom:0,sourceTo:first.length},{from:4,to:7,sourceFrom:first.length,sourceTo:source.length}]);
+  const native=await h.rpc({type:'TRANSLATE',requestId:'native-pairs',text:source,language:'en'});
+  assert.deepEqual(JSON.parse(JSON.stringify(native.data)),{text:'前半句。回应。'});
+  const unaligned=harness({},async()=>new Response(JSON.stringify([[['完整译文。','Different source']]])));
+  assert.equal((await unaligned.rpc({type:'TRANSLATE',requestId:'no-pairs',text:source,automatic:true})).data.alignment.length,0);
+  const padded=harness({},async()=>new Response(JSON.stringify([[['  前半句。',first],['回应。  ',last]]])));
+  const normalized=(await padded.rpc({type:'TRANSLATE',requestId:'padded-pairs',text:source+'.',sourceText:source,automatic:true})).data;
+  assert.equal(normalized.text,'前半句。回应。');assert.deepEqual(JSON.parse(JSON.stringify(normalized.alignment)),JSON.parse(JSON.stringify(r.data.alignment)));
+});
+
+test('custom ASR translation receives bounded context as data and translates only the current complete unit',async()=>{
+  let body;
+  const h=harness({local:{settings:{provider:'custom',endpoint:'https://translation.example/v1/chat/completions',model:'translator'}}},async(url,options)=>{
+    body=JSON.parse(options.body);return new Response(JSON.stringify({choices:[{message:{content:'自然完整的本段译文。'},finish_reason:'stop'}]}));
+  });
+  const r=await h.rpc({type:'TRANSLATE',requestId:'context',text:'The current statement.',automatic:true,contextBefore:'a'.repeat(600),contextAfter:'b'.repeat(600),language:'en'});
+  assert.equal(r.data.text,'自然完整的本段译文。');
+  const fields=JSON.parse(body.messages[1].content);
+  assert.equal(fields.本段,'The current statement.');assert.equal(fields.前文.length,400);assert.equal(fields.后文.length,400);
+  assert.match(body.messages[0].content,/中文母语/);assert.match(body.messages[0].content,/否定、条件、因果、引语归属/);assert.match(body.messages[0].content,/只翻译本段/);
+});
+
+test('valid bilingual alignment persists across worker restart and invalid coordinates are discarded',async()=>{
+  const h=harness(),row={source:'A reply',text:'回应。',alignment:[{from:0,to:3,sourceFrom:0,sourceTo:7},{from:0,to:3,sourceFrom:-1,sourceTo:99}],unexpected:'remove'};
+  await h.rpc({type:'CACHE_PUT',videoId:'test-id',rows:{aligned:row}});
+  const next=harness({local:h.local}),cached=(await next.rpc({type:'CACHE_GET',videoId:'test-id'})).data.aligned;
+  assert.deepEqual(JSON.parse(JSON.stringify(cached)),{source:'A reply',text:'回应。',alignment:[row.alignment[0]]});
+});
+
 test('custom sentence translation has enough output budget and rejects token-limit truncation', async () => {
   let body;
   const h=harness({local:{settings:{provider:'custom',endpoint:'https://translation.example/v1/chat/completions',model:'test-model'}}},async (url,options)=>{

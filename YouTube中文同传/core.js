@@ -152,6 +152,10 @@
       // need additional evidence instead of accepting every subject/verb pair.
       const plain = mainStart(i) && (w.word==='i' && !relativeNoun.test(previous) || finishedAdverb.test(previous)) && !linker.test(previous) && !reporting.test(previous) && !discourse.test(previous);
       if (!strong && !temporal && !plain) continue;
+      const prefix=text.slice(from,w.at);
+      if(plain && /\b(?:how|why|whether|what)\s+(?:[a-z]+\s+){0,3}$/i.test(prefix))continue;
+      if(/^(?:and|or|but)$/.test(w.word) && /\b(?:because|whether|so that)\b/i.test(prefix))continue;
+      if(/^(?:and|or|but)$/.test(w.word) && /\b(?:told|said|says|believed|thought|claimed|explained)\b[\s\S]*\bthat\b/i.test(prefix))continue;
       const left=text.slice(from,w.at).trim(), leftWords=words.slice(wordFrom,i);
       if(left.length<(strong||temporal?28:45)||leftWords.length<5||incomplete.test(left))continue;
       const predicates=leftWords.filter(t=>finiteVerb.test(t.word)).length;
@@ -207,6 +211,20 @@
       // Inverted independent question: "did anyone else see ...".
       if(w.pos==='AUX'&&words[i+1]?.pos==='PRON'&&predicate(words[skipModifiers(i+2)])&&!linker.test(prev.word))score=Math.max(score,10);
       if(!score)continue;
+      // Translation units must close their object/complement before a new
+      // subject. POS alone mistakes "share / this story" for two sentences.
+      const head = text.slice(0,w.at);
+      const bare = mainStart(i) || nounStart(i);
+      // A demonstrative can refer back to a closed indefinite object:
+      // "something he can't explain / this anomaly ...". This is different
+      // from the still-missing object in "wanted to share / this story ...".
+      const closedReference=nounStart(i)&&/^(?:this|these|those)$/.test(w.word)&&at(i-2)!=='to'&&/\b(?:something|anything|everything|nothing)\s+(?:i|we|you|he|she|they|it)\s+(?:[a-z]+(?:['’][a-z]+)?\s+){1,5}$/i.test(head);
+      if(bare && prev.pos==='VERB' && !closedReference)continue;
+      if(bare && /\b(?:how|why|whether|what)\s+(?:[a-z]+\s+){0,3}$/i.test(head))continue;
+      // Coordinated reported/causal clauses belong to the same proposition:
+      // "they believed ... and they would ...", not a new assertion by us.
+      if(/^(?:and|or|but)$/.test(w.word) && /\b(?:because|whether|in order to|so that)\b/i.test(head))continue;
+      if(/^(?:and|or|but)$/.test(w.word) && /\b(?:told|tell|said|says|say|believed|believe|thought|think|claimed|claims|explained|explains|knew|know)\b[\s\S]*\bthat\b/i.test(head))continue;
       // Never cut just before a relative pronoun, complement, or article.
       if(/^(?:something|anything|everything|nothing)$/.test(prev.word)&&mainStart(i))continue;
       candidates.push({i,at:w.at,score});
@@ -250,25 +268,86 @@
   }
   // Display pages are continuations of the same translated/voiced sentence.
   // Exact offsets include whitespace; concatenating pages recovers the input.
-  function subtitlePages(text, limit=80) {
+  let pageWords, pageGraphemes;
+  function subtitlePages(text, limit=48) {
     text=String(text||'');limit=Math.max(12,Math.floor(limit));
-    const pages=[];let from=0;
-    while(from<text.length) {
-      let to=text.length;
-      if(to-from>limit) {
-        const balanced=Math.ceil((to-from)/Math.ceil((to-from)/limit));
-        to=from+naturalCut(text.slice(from),balanced);
-      }
-      // Carry whitespace forward rather than silently dropping it.
-      while(to<text.length&&/\s/.test(text[to]))to++;
-      pages.push({from,to,text:text.slice(from,to)});from=to;
+    if(!text)return [];
+    if(text.length<=limit)return [{from:0,to:text.length,text}];
+    const points=new Map([[0,0],[text.length,0]]), hard=Math.ceil(limit*1.3);
+    // Word boundaries protect Chinese compounds, numbers, Latin names and
+    // grapheme clusters. Punctuation is preferred; length is only a soft cost.
+    if(typeof Intl.Segmenter==='function') {
+      pageWords ||= new Intl.Segmenter('zh',{granularity:'word'});
+      pageGraphemes ||= new Intl.Segmenter('zh',{granularity:'grapheme'});
+      for(const t of pageWords.segment(text))points.set(t.index+t.segment.length,9);
+      // Emergency candidates only inside a token too wide for the viewport.
+      for(const t of pageWords.segment(text))if(t.segment.length>hard)
+        for(const g of pageGraphemes.segment(t.segment))points.set(t.index+g.index+g.segment.length,30);
+    } else { let at=0;for(const c of text){at+=c.length;points.set(at,30);} }
+    const opening=/[（(《「『“‘]$/, closing=/^[，。！？；：、,.!?;:）)》」』”’]/;
+    for(const m of text.matchAll(/[。！？!?；;]+[”’」』）》)]*|[，,：:]+/gu)) {
+      let to=m.index+m[0].length;while(to<text.length&&/\s/.test(text[to]))to++;
+      points.set(to,/[。！？!?；;]/.test(m[0])?0:2);
     }
+    const candidates=[...points].sort((a,b)=>a[0]-b[0]).filter(([at])=>
+      at===0||at===text.length||(!opening.test(text.slice(0,at))&&!closing.test(text.slice(at))));
+    const cost=Array(candidates.length).fill(Infinity), previous=[];cost[0]=0;
+    for(let b=1;b<candidates.length;b++)for(let a=b-1;a>=0;a--) {
+      const size=candidates[b][0]-candidates[a][0];if(size>hard)break;
+      if(!Number.isFinite(cost[a]))continue;
+      const part=text.slice(candidates[a][0],candidates[b][0]),last=b===candidates.length-1;
+      let penalty=last?0:candidates[b][1];
+      // Do not strand function words or the degree modifier before an adjective.
+      if(!last && /(?:的|得|地|把|被|在|向|与|和|及|或|而|不|没|更|最|很|第|一个|这些|那些|因为|如果|虽然|直到|为了|以至于|因此|所以|那么|但是|不过|然而|而且|并且|不仅|只要|除非|尽管|既然|即使|无论|一旦)$/.test(part.trim()))penalty+=24;
+      if(!last && /^(?:的|得|地|了|着|过|吗|呢|吧|们|时|后|前)/.test(text.slice(candidates[b][0])))penalty+=15;
+      const short=part.trim().length<Math.max(4,limit*.22)?10:0;
+      const value=cost[a]+penalty+short+Math.pow((size-limit*.85)/limit,2)*4+Math.pow(Math.max(0,size-limit)/limit,2)*20;
+      if(value<cost[b]){cost[b]=value;previous[b]=a;}
+    }
+    if(!Number.isFinite(cost.at(-1))) {
+      // A single quoted/name token may exceed the budget: never lose text.
+      const pages=[];let from=0;while(from<text.length){const cut=naturalCut(text.slice(from),limit);pages.push({from,to:Math.min(text.length,from+cut),text:text.slice(from,from+cut)});from+=cut;}return pages;
+    }
+    const pages=[];let b=candidates.length-1;
+    while(b>0){const a=previous[b],from=candidates[a][0],to=candidates[b][0];pages.unshift({from,to,text:text.slice(from,to)});b=a;}
     return pages;
+  }
+  function translationInput(cue, language='') {
+    const text=cue.text;
+    if(text.length>=4500 || !cue.automatic || !/^en(?:-|$)/i.test(language) || /[.!?。！？][”’"')]*$/.test(text))return text;
+    // Only terminal punctuation; raw captions and timestamps remain untouched.
+    return text+(/^(?:did|does|do|can|could|would|will|is|are|was|were)\s+(?:i|we|you|he|she|they|it|anyone|anybody)\b/i.test(text)?'?':'.');
+  }
+  function validatedAlignment(alignment, source, target) {
+    if(!Array.isArray(alignment)||alignment.length>256)return [];
+    let end=0;
+    return alignment.filter(a=>{
+      if(!a || !['from','to','sourceFrom','sourceTo'].every(k=>Number.isInteger(a[k])) || a.from<end || a.from<0 || a.to<=a.from || a.to>target.length || a.sourceFrom<0 || a.sourceTo<=a.sourceFrom || a.sourceTo>source.length)return false;
+      end=a.to;return true;
+    }).map(a=>({from:a.from,to:a.to,sourceFrom:a.sourceFrom,sourceTo:a.sourceTo}));
+  }
+  function pageSource(page, source, translated, alignment=[]) {
+    source=String(source||'');translated=String(translated||'');
+    const matched=validatedAlignment(alignment,source,translated).filter(a=>a.to>page.from&&a.from<page.to);
+    if(!matched.length)return source; // Unaligned MT: show the whole source unit, never guessed word ratios.
+    let covered=page.from;
+    for(const a of matched){
+      if(a.from>covered && translated.slice(covered,a.from).trim())return source;
+      covered=Math.max(covered,a.to);
+    }
+    if(covered<page.to && translated.slice(covered,page.to).trim())return source;
+    return source.slice(Math.min(...matched.map(a=>a.sourceFrom)),Math.max(...matched.map(a=>a.sourceTo)));
   }
   function speechParts(text, maxLength = 140) {
     const parts = [];
     for (const range of sentenceRanges(text)) {
       let remaining = text.slice(range.from, range.to).trim();
+      if (remaining.length>maxLength && /\p{Script=Han}/u.test(remaining)) {
+        // Utterance boundaries need the same word/punctuation protection as
+        // display pages, with a much larger budget to preserve natural prosody.
+        parts.push(...subtitlePages(remaining, Math.floor(maxLength/1.3)).map(p=>p.text.trim()).filter(Boolean));
+        continue;
+      }
       while (remaining.length > maxLength) {
         const cut = naturalCut(remaining, maxLength);
         parts.push(remaining.slice(0, cut).trim()); remaining = remaining.slice(cut).trim();
@@ -297,7 +376,14 @@
     } catch{return false;}
   }
   function prepareCues(rows, {automatic = false, live = false, language = ''} = {}) {
-    if (automatic) return groupCues(rows, {live, language}).map(c => ({...c, automatic: true}));
+    if (automatic) {
+      const cues=groupCues(rows,{live,language}).map(c=>({...c,automatic:true}));
+      for(let i=0;i<cues.length;i++) {
+        cues[i].contextBefore=(cues[i-1]?.text||'').slice(-400);
+        cues[i].contextAfter=live?'':(cues[i+1]?.text||'').slice(0,400);
+      }
+      return cues;
+    }
     // Authored captions already have intentional boundaries. Do not combine
     // rows, infer sentences, split punctuation, or hold an unfinished live row.
     return rows.filter(r => clean(r.text)).map(r => ({...r, text: clean(r.text), automatic: false,
@@ -307,7 +393,11 @@
     const groups = [], blocks = []; let block = null;
     for (const row of rows) {
       const text = clean(row.text); if (!text) continue;
-      if (!block || row.start - block.end > 1.5) { block = {chunks: [], pieces: [], length: 0, end: row.end}; blocks.push(block); }
+      const gap=block?row.start-block.end:0, tail=block?.pieces.length?block.chunks.at(-1):'';
+      const waitingForComplement=/\b(?:until|because|although|unless|if|when|while|that|which|who|of|to|with|for|and|or|a|an|the|very|more|real)\s*$/i.test(tail);
+      // A short hesitation after "until" is not a sentence boundary. Very
+      // long silence still closes a block; captions cannot establish intent.
+      if (!block || gap>1.5 && (gap>=6 || !waitingForComplement)) { block = {chunks: [], pieces: [], length: 0, end: row.end}; blocks.push(block); }
       const previous = block.chunks.at(-1) || '';
       const join = !previous || /^[,.;:!?。！？、，；：）)\]]/u.test(text) || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]$/u.test(previous) && /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text) ? '' : ' ';
       block.chunks.push(join, text); block.length += join.length;
@@ -434,7 +524,8 @@
   }
   function publicSettings(s) { const {apiKey, ...rest} = sanitizeSettings(s); return rest; }
   function cacheKey(cue, lang, settings) {
-    return `sentence-v5:${cue.automatic === false ? 'native' : 'asr'}:${settings.provider}:${settings.cacheRevision}:${lang}:${hash(cue.text)}`;
+    const context=cue.automatic && settings.provider==='custom'?`${cue.contextBefore||''}|${cue.contextAfter||''}`:'';
+    return `${cue.automatic===false?'sentence-v5:native':'meaning-v6:asr'}:${settings.provider}:${settings.cacheRevision}:${lang}:${hash(context?cue.text+'|'+context:cue.text)}`;
   }
   function permissionOrigin(endpoint) {
     const u = new URL(endpoint);
@@ -547,7 +638,7 @@
       return Math.max(0, last - position);
     }
   }
-  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, speechParts, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
+  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
   root.DubCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

@@ -220,7 +220,7 @@
       }
       select.value = selected;
     }
-    render({active, status, error, translated, source, captionProgress = 0, paginate = true, queueStatus = '', playbackRate = 1, effectiveRate = DubCore.speechRate(this.settings, playbackRate)}) {
+    render({active, status, error, translated, source, captionProgress = 0, alignment = [], paginate = true, queueStatus = '', playbackRate = 1, effectiveRate = DubCore.speechRate(this.settings, playbackRate)}) {
       this.active = active;
       const toggle = this.shadow.querySelector('.toggle'); toggle.classList.toggle('active', active); this.text(toggle, active ? '关闭' : '开启');
       this.text(this.shadow.querySelector('.rate-info'), `基础 ${this.settings.rate.toFixed(2)}× · 视频 ${playbackRate.toFixed(2)}× · 朗读 ${effectiveRate.toFixed(2)}×；调速从下一段短句生效。`);
@@ -230,22 +230,21 @@
       this.captionVisible = !sub.hidden;
       this.applySubtitleStyle();
       const width = this.player.clientWidth * this.settings.subtitleWidth / 100;
-      const limit = Math.max(18,Math.min(80,Math.floor(width / Math.max(10,this.subtitleBaseSize) * 1.65)));
-      const signature = `${paginate}:${limit}:${translated}:${source}:${this.settings.subtitleSourceSize}`;
+      const limit = Math.max(18,Math.min(48,Math.floor(width / Math.max(10,this.subtitleBaseSize) * 1.45)));
+      const signature = `${paginate}:${limit}:${translated}:${source}:${JSON.stringify(alignment)}`;
       if (signature !== this.pageSignature) {
         this.pageSignature = signature;
         this.chinesePages = DubCore.subtitlePages(translated,paginate ? limit : Math.max(12,translated?.length || 0));
-        this.sourcePages = DubCore.subtitlePages(source,paginate ? Math.max(60,Math.min(240,Math.floor(limit * 1.7 / this.settings.subtitleSourceSize))) : Math.max(12,source?.length || 0));
+        this.sourcePages = this.chinesePages.map(page=>({text:paginate?DubCore.pageSource(page,source,translated,alignment):String(source||'')}));
       }
       const pageAt = (pages, offset) => pages.findIndex(p=>offset < p.to);
       const chineseIndex = Math.max(0,pageAt(this.chinesePages,Math.min(captionProgress,Math.max(0,(translated?.length || 0)-1))));
-      const fraction = (translated?.length || 0) ? captionProgress / translated.length : 0;
-      const sourceIndex = Math.max(0,pageAt(this.sourcePages,Math.min(Math.floor(fraction*(source?.length || 0)),Math.max(0,(source?.length || 0)-1))));
+      const sourceIndex=chineseIndex;
       this.text(sub.querySelector('.chinese'), this.chinesePages[chineseIndex]?.text.trim() || '');
       sub.dataset.page = `${chineseIndex+1}/${this.chinesePages.length}`;
       const pageInfo=sub.querySelector('.page-info');
       pageInfo.hidden=this.chinesePages.length<2;
-      this.text(pageInfo,`续 ${chineseIndex+1}/${this.chinesePages.length}`);
+      this.text(pageInfo,`${chineseIndex+1} / ${this.chinesePages.length}`);
       const original = sub.querySelector('.source'); original.hidden = !this.settings.bilingual || !source || source === translated;
       this.text(original.querySelector('span'), this.sourcePages[sourceIndex]?.text.trim() || '');
       this.applySubtitleStyle(); this.fitSubtitle();

@@ -37,7 +37,9 @@ test('display continuations retain exact text and surrogate pairs without creati
     assert.equal(pages.map(p=>p.text).join(''),text);
     assert.ok(pages.every(p=>p.to>p.from&&p.text===text.slice(p.from,p.to)));
     assert.ok(pages.every(p=>!/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/.test(p.text)));
-    assert.ok(pages.every(p=>p.text.trim().length<=60));
+    // The viewport budget is soft: a natural clause may use up to 30% more
+    // space instead of stranding a word/particle at the page boundary.
+    assert.ok(pages.every(p=>p.text.trim().length<=78));
   }
 });
 test('model windows preserve offsets and words on long transcripts',()=>{
