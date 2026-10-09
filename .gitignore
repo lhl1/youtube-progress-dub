@@ -1,0 +1,17 @@
+node_modules/
+backups/
+dist/*
+!dist/.gitkeep
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+*.log
+playwright-report/
+test-results/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

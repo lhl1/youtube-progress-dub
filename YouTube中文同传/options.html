@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>中文同传 · 声音与设置</title><link rel="stylesheet" href="ui.css"></head>
+<body><main class="form">
+  <header><div class="tag">YOUTUBE 中文同传</div><h1>按你的节奏，听懂视频</h1><p class="muted">建议用 Microsoft Edge。声音来自浏览器提供的中文语音列表。</p></header>
+  <form id="form">
+    <section class="card"><h2>中文声音</h2>
+      <label for="voice">朗读声音</label><select id="voice"><option value="">自动选择 · 优先 Edge 自然声音</option></select><p id="voiceHint" class="muted small"></p>
+      <div class="grid"><div class="field"><label for="rate">基础语速 <output id="rateValue"></output></label><input id="rate" type="range" min="0.6" max="2.5" step="0.01"><small>实际朗读速度 = 基础语速 × 视频倍速，例如 1.5 × 2.0 = 3.0。完整模式保持这个乘积；跟随模式必要时再提速。调速从下一段短句生效。</small></div>
+      <div class="field"><label for="volume">中文音量 <output id="volumeValue"></output></label><input id="volume" type="range" min="0" max="1" step="0.05"></div>
+      <div class="field"><label for="originalVolume">原视频音量上限（全程） <output id="originalVolumeValue"></output></label><input id="originalVolume" type="range" min="0" max="1" step="0.01"><small>同传开启期间保持音量上限，停止后恢复；0 表示同传期间原声静音。</small></div></div>
+      <div class="row" style="margin-top:18px"><button id="testVoice" type="button">试听中文声音</button><button id="refreshVoices" type="button">重新获取声音</button></div>
+      <p id="voiceMessage" class="message small" role="status"></p>
+    </section>
+    <section class="card"><h2>播放与字幕</h2>
+      <div class="grid"><div class="field"><label for="syncMode">同步方式</label><select id="syncMode"><option value="follow">跟随视频 · 自动语速</option><option value="complete">完整朗读 · 不暂停视频</option></select><small>完整模式按基础语速乘视频倍速逐句读完，再读下一句，视频照常播放；中文可能落后，视频结束后继续读完剩余内容。</small></div>
+      <div class="field"><label for="lookahead">预读窗口 <output id="lookaheadValue"></output></label><input id="lookahead" type="range" min="30" max="240" step="10"><small>自动随视频倍速、服务延迟调整。拖动进度后优先处理新位置。</small></div></div>
+      <label class="check"><input id="subtitle" type="checkbox"><span>在播放器内显示中文字幕</span></label>
+      <label class="check"><input id="bilingual" type="checkbox"><span>同时显示原文（直接使用中文字幕时无独立原文）</span></label>
+      <label class="check"><input id="autoTranslate" type="checkbox"><span>优先尝试 YouTube 自动翻译中文，减少外部翻译请求</span></label>
+      <label class="check"><input id="autoStart" type="checkbox"><span>打开视频自动开始（浏览器仍可能要求首次点击播放）</span></label>
+    </section>
+    <section class="card caption-settings"><h2>字幕设置</h2><p class="muted small">播放器小图标中的“字幕设置”可以即时调整并自动保存。本页预览修改后，点击底部“保存设置”生效。</p><div id="captionSettings"></div></section>
+    <section class="card"><h2>翻译服务</h2>
+      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
+      <p class="muted small">默认接口与参考插件使用的翻译源一致。它不是有可用性承诺的正式 API；断网、限流时会退避重试。已有中文字幕可直接朗读。</p>
+      <div id="customFields" class="hidden">
+        <label for="endpoint">完整 Chat Completions 地址</label><input id="endpoint" type="url" placeholder="https://你的服务域名/v1/chat/completions" autocomplete="off">
+        <label for="model">模型名称</label><input id="model" type="text" placeholder="填写服务提供的模型名称" autocomplete="off">
+        <label for="apiKey">API 密钥（本机服务可留空）</label><input id="apiKey" type="password" autocomplete="off">
+        <p class="muted small">字幕会发送给你指定的服务。保存时仅申请该域名的访问权限；密钥保存在本机扩展存储，不传给 YouTube 页面。支持 HTTPS，以及 localhost / 127.0.0.1 的 HTTP 服务。</p>
+      </div>
+    </section>
+    <div class="sticky"><div class="row"><button type="submit" class="primary">保存设置</button><button id="reset" type="button">恢复推荐设置</button></div><div id="message" class="message" role="status"></div></div>
+  </form>
+  <section class="card"><h2>本地缓存</h2><p id="cacheStats" class="muted"></p><button id="clearCache" type="button">清除已保存译文</button><p class="small muted">最多保留 10 个视频，每个视频最近约 1100 段译文，总量约 5 MB，7 天过期。不保存视频或语音文件。</p></section>
+  <footer><p class="note muted small">使用范围：有可读取字幕的 YouTube 视频。没有字幕时不会自动识别音轨。直播字幕采用持续捕获，预读能力受源字幕限制。插件会在开始时尝试开启 CC，停止后恢复由插件开启的 CC。</p></footer>
+</main><script src="core.js"></script><script src="subtitle-ui.js"></script><script src="speech.js"></script><script src="options.js"></script></body></html>

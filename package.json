@@ -1,0 +1,36 @@
+{
+  "name": "youtube-progress-dub",
+  "version": "1.6.1",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node tests/browser.cjs",
+    "pack": "python tools/package.py",
+    "backup": "python tools/backup.py",
+    "test:native-rate": "node tests/native-rate.cjs",
+    "test:player-layout": "node tests/real-player-layout.cjs",
+    "test:auto-start": "node tests/auto-start.cjs",
+    "test:continuity": "node tests/continuity.cjs",
+    "test:subtitle-settings": "node tests/subtitle-settings.cjs",
+    "test:playback-resume": "node tests/playback-resume.cjs",
+    "test:asr-sentences": "node tests/asr-sentences.cjs",
+    "build:syntax": "node tools/build-syntax.cjs",
+    "test:semantic-pages": "node tests/semantic-pages.cjs",
+    "test:native-boundaries": "node tests/native-boundaries.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "^1.56.0",
+    "wink-eng-lite-web-model": "1.8.1",
+    "wink-nlp": "2.4.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lhl1/youtube-progress-dub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lhl1/youtube-progress-dub/issues"
+  },
+  "homepage": "https://github.com/lhl1/youtube-progress-dub#readme"
+}

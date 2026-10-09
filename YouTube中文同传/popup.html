@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube 中文同传</title><link rel="stylesheet" href="ui.css"></head>
+<body class="popup">
+  <div class="tag">随播随译</div><h1>YouTube 中文同传</h1><p class="muted small">用中文听懂视频，长视频持续跟随进度。</p>
+  <section class="card"><div id="status" class="status" role="status">正在连接视频…</div><div id="error" class="message small"></div></section>
+  <div class="row"><button id="toggle" class="primary" disabled>开始同传</button><button id="retry" disabled>恢复 / 重试</button></div>
+  <label for="mode">同步方式</label><select id="mode"><option value="follow">跟随视频 · 自动语速</option><option value="complete">完整朗读 · 不暂停视频</option></select>
+  <div class="row" style="margin-top:16px"><button id="options">播放器设置</button><button id="export" disabled>导出字幕</button></div>
+  <p class="muted small">点击视频底部控制栏的中文同传图标，即可开关同传、调整声音和全部常用设置。</p>
+  <details><summary>运行信息</summary><div id="diagnostics" class="muted small status"></div></details>
+  <script src="core.js"></script><script src="popup.js"></script>
+</body></html>

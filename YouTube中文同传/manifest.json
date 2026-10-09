@@ -1,0 +1,65 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube 中文同传 · 随播随译",
+  "version": "1.6.1",
+  "description": "按 YouTube 播放进度准备中文字幕并调用 Edge 中文语音朗读，支持长视频、跳转、重试和本地缓存。",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "webRequest",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://translate.googleapis.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YouTube 中文同传"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "vendor/syntax.js",
+        "core.js",
+        "speech.js",
+        "volume.js",
+        "subtitle-ui.js",
+        "player-ui.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7KuYe2KIL5GpEgo3fATwa/bLQmScAkKAQYXMD/Df8HqRTxy1fW3NG0LbwHTrlv9AqOHA2bk0lTsuQ34ZKtgTVLaS5xI6T6aJy+a6Cwa+Rz6bg5th5RlovPUEEgzt0Py45rLMLCdJ8JJ7lmPNEz5sn0rglgKPqllS6tFoJmnbR0UPw0yERiTBlEdm3+NMq2R5436GQ9gy6NXaSriB9CU+7SaebuK5uYGLy0mxxgu5p6kmDkJfSjWwBnk8QZbLaZV5mqHRcGhPahGg6WC6uxHuioX6A2ipWYd/a3Sy44d7CO05tNdwG72jLMVl4IGKWwe5cEpjf7yjypXq/sZVSUkYfQIDAQAB"
+}
