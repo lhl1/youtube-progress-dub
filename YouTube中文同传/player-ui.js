@@ -26,7 +26,6 @@
     .hint{color:#aaa;font-size:11px;line-height:1.55;margin:5px 0 9px;overflow-wrap:anywhere}.status{font-size:11px;color:#bbb;line-height:1.6;white-space:pre-wrap;margin:9px 0 0}.error{color:#ffc9bc;overflow-wrap:anywhere;font-size:12px;line-height:1.5;margin-top:6px}
     .actions{display:flex;gap:5px;flex-wrap:wrap;margin:7px -6px 0}.actions button{font-size:12px;padding:7px 9px;background:#ffffff0a}.saved{font-size:11px;color:#aaa;min-height:16px;margin-top:8px}
     .sub{position:absolute;z-index:1;pointer-events:none}
-    .page-info{position:absolute;right:0;bottom:calc(100% + 3px);font:11px Arial,sans-serif;color:#ddd;background:#0008;border-radius:3px;padding:2px 5px}.page-info[hidden]{display:none}
     @media(max-height:380px){.panel{bottom:52px;max-height:calc(100% - 62px)}}
     ${DubSubtitles.css}
   `;
@@ -69,7 +68,7 @@
             <div class="status" role="status"></div><div class="error" aria-live="polite"></div><div class="saved" aria-live="polite"></div>
           </div>
         </section>
-        <div class="sub caption-surface" hidden><span class="page-info" hidden></span><div class="chinese-line"><span class="chinese"></span></div><div class="source"><span></span></div></div>`;
+        <div class="sub caption-surface" hidden><div class="chinese-line"><span class="chinese"></span></div><div class="source"><span></span></div></div>`;
       player.appendChild(this.host);
       this.panel = this.shadow.querySelector('.panel');
       // A top-layer popover escapes both player stacking contexts and clipping.
@@ -242,9 +241,6 @@
       const sourceIndex=chineseIndex;
       this.text(sub.querySelector('.chinese'), this.chinesePages[chineseIndex]?.text.trim() || '');
       sub.dataset.page = `${chineseIndex+1}/${this.chinesePages.length}`;
-      const pageInfo=sub.querySelector('.page-info');
-      pageInfo.hidden=this.chinesePages.length<2;
-      this.text(pageInfo,`${chineseIndex+1} / ${this.chinesePages.length}`);
       const original = sub.querySelector('.source'); original.hidden = !this.settings.bilingual || !source || source === translated;
       this.text(original.querySelector('span'), this.sourcePages[sourceIndex]?.text.trim() || '');
       this.applySubtitleStyle(); this.fitSubtitle();

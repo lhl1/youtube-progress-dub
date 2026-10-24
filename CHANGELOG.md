@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.2 — 2026-10-24
+
+- Remove the page counter above captions while preserving automatic-caption pagination, bilingual display and complete narration.
+
 ## 1.7.1 — 2026-10-09
 
 - Skip square-bracket annotations, full-width variants, symbols and complete emoji graphemes during narration, using short silent pauses while preserving caption text and original character offsets.

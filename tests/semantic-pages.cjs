@@ -66,7 +66,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
         const length=await run('__asr.last.text.length');
         for(let at=0;at<length;at++) {
           await run(`__asr.last.onboundary({charIndex:${at}})`);
-          const display=await ui(function(){const sub=this.querySelector('.sub'),zh=sub.querySelector('.chinese'),line=sub.querySelector('.chinese-line'),s=getComputedStyle(line);return {chinese:zh.textContent,source:sub.querySelector('.source span').textContent,page:sub.dataset.page,lines:line.getBoundingClientRect().height/parseFloat(s.lineHeight),height:sub.getBoundingClientRect().height}});
+          const display=await ui(function(){const sub=this.querySelector('.sub'),zh=sub.querySelector('.chinese'),line=sub.querySelector('.chinese-line'),s=getComputedStyle(line);return {chinese:zh.textContent,source:sub.querySelector('.source span').textContent,page:sub.dataset.page,pageIndicator:!!sub.querySelector('.page-info'),lines:line.getBoundingClientRect().height/parseFloat(s.lineHeight),height:sub.getBoundingClientRect().height}});
           if(!seen.length||seen.at(-1)!==display.chinese){seen.push(display.chinese);metrics.push(display);}
         }
         if(i===0&&parts===0) {
@@ -80,7 +80,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
         await run('__asr.last.onend()');parts++;
         if(parts>20)throw new Error('Narration loop did not advance');
       }
-      assert.equal(seen.join(''),text);assert.ok(metrics.every(m=>m.lines<=2.1),JSON.stringify(metrics));
+      assert.equal(seen.join(''),text);assert.ok(metrics.every(m=>m.lines<=2.1),JSON.stringify(metrics));assert.ok(metrics.every(m=>!m.pageIndicator),'Page numbers must not appear on captions');
       if(i===0)assert.ok(seen.length>=3);
       displays.push({source:sample.sentences[i],pages:metrics,utterances:parts});
     }
