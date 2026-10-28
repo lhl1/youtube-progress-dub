@@ -6,6 +6,7 @@
     "test": "node --test tests/*.test.cjs",
     "test:browser": "node tests/browser.cjs",
     "pack": "python tools/package.py",
+    "pack:edge-store": "python tools/package.py --edge-store",
     "backup": "python tools/backup.py",
     "test:native-rate": "node tests/native-rate.cjs",
     "test:player-layout": "node tests/real-player-layout.cjs",

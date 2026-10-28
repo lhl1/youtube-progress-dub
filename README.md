@@ -63,6 +63,7 @@
 | 下载内容 | 用途 |
 | --- | --- |
 | 扩展 ZIP | 推荐安装方式：解压后加载文件夹。 |
+| `*-edge-store.zip` | 发布者上传 Microsoft Edge Add-ons 的专用包，已移除商店不接受的 `manifest.key`。 |
 | CRX | 签名安装包；浏览器可能限制非商店来源的直接安装。 |
 | SHA256SUMS.txt | 检查下载文件是否完整，包含 ZIP 与 CRX 的 SHA-256 校验值。 |
 | Source code | 完整源码，适合查看实现或参与开发。 |
@@ -389,6 +390,14 @@ npm run test:semantic-pages
 npm run backup
 npm run pack
 ```
+
+上传 Microsoft Edge Add-ons 时使用专用商店包：
+
+```sh
+npm run pack:edge-store
+```
+
+输出 `dist/youtube-progress-dub-v<版本号>-edge-store.zip` 和独立的 SHA-256 校验文件。该命令只在 ZIP 内移除 `manifest.key`，不签 CRX，也不修改源码中的公钥和本地安装身份；如果目标文件已经存在会停止，避免覆盖历史包。上传时选这个 `edge-store.zip`，不要选普通安装 ZIP 或 CRX。商店会分配自己的扩展 ID。
 
 安装包输出到 `dist/`。首次自行签名会在 `tools/local-signing-key.pem` 生成私钥，并把公钥写入扩展清单。私钥已被 `.gitignore` 排除，请妥善离线备份，绝不提交。
 
