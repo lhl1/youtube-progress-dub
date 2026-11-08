@@ -17,7 +17,13 @@
     if (!player || player.videoDetails?.videoId !== id()) return;
     latest = player;
     const renderer = player.captions?.playerCaptionsTracklistRenderer;
-    send('TRACKS', {videoId: id(), live: !!player.videoDetails?.isLiveContent, tracks: (renderer?.captionTracks || []).map(t => ({
+    let audioLanguage=player.videoDetails?.defaultAudioLanguage||player.microformat?.playerMicroformatRenderer?.defaultAudioLanguage||'';
+    try {
+      const selected=document.querySelector('#movie_player')?.getAudioTrack?.();
+      const code=selected?.languageCode||selected?.id?.split('.')[0];
+      if(typeof code==='string'&&/^[a-z]{2,3}(?:-[A-Za-z0-9]+)*$/.test(code))audioLanguage=code;
+    }catch{}
+    send('TRACKS', {videoId: id(), audioLanguage, live: !!player.videoDetails?.isLiveContent, tracks: (renderer?.captionTracks || []).map(t => ({
       baseUrl: t.baseUrl, languageCode: t.languageCode, vssId: t.vssId, kind: t.kind || '',
       isTranslatable: !!t.isTranslatable, name: t.name?.simpleText || t.name?.runs?.map(r => r.text).join('') || t.languageCode
     }))});

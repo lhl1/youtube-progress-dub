@@ -84,7 +84,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
       let parts=0;
       while(await run(`__asr.engine.current?.options.cue?.text === ${JSON.stringify(sample.sentences[i])}`)) {
         await run('__asr.last.onboundary({charIndex:Math.max(0,__asr.last.text.length-1)})');
-        const display=await ui(function(){const sub=this.querySelector('.sub');return {chinese:sub.querySelector('.chinese').textContent,source:sub.querySelector('.source span').textContent,page:sub.dataset.page,continuationHidden:sub.querySelector('.page-info').hidden}});
+        const display=await ui(function(){const sub=this.querySelector('.sub');return {chinese:sub.querySelector('.chinese').textContent,source:sub.querySelector('.source span').textContent,page:sub.dataset.page,continuationHidden:!sub.querySelector('.page-info')||sub.querySelector('.page-info').hidden}});
         assert.equal(display.chinese,sample.chinese[i]);assert.equal(display.source,sample.sentences[i]);assert.equal(display.page,'1/1');assert.equal(display.continuationHidden,true);
         displays.push(display);await run('__asr.last.onend()');parts++;
       }

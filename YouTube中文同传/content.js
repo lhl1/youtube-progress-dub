@@ -11,6 +11,9 @@
   const sessionVolume = new DubVolume();
   let sessionToken = 0, view = null, speechErrors = 0, skipped = 0;
   let pendingStartId = '', pendingStartAt = 0, voiceNeedsGesture = false;
+  let settingsReady=false,metadataReady=false,audioLanguage='',chineseOriginal=false,autoSession=false;
+  let settingsLoadPending=false,settingsRetryAt=0;
+  let sourceRows=[],narrationAnchor=0;
   const pendingPage = new Map();
   const scheduler = new C.Scheduler({
     translate: requestTranslation,
@@ -22,7 +25,7 @@
       tick();
     },
     onError: error => report(error.message),
-    onReset: () => { speech.stop(); restoreVolume(); lastSpoken = ''; narration.reset(video?.currentTime || 0); }
+    onReset: () => { speech.stop(); restoreVolume(); lastSpoken = ''; narrationAnchor=video?.currentTime||0; narration.reset(narrationAnchor); }
   });
   const speech = new DubSpeech({
     onState: current => { if (!current) restoreVolume(); render(); },
@@ -78,6 +81,7 @@
   }
   function installRows(rows, lang, translated, name, {liveAppend = false, automatic = false} = {}) {
     if (!rows.length) throw new Error('字幕中没有可读内容');
+    sourceRows=automatic?rows:[];
     // Replacing a live transcript every poll would interrupt the current voice.
     if (liveAppend && sourceAutomatic === automatic && scheduler.cues.length) {
       const old = new Map(scheduler.cues.map(c => [c.id, c]));
@@ -180,19 +184,21 @@
   function speakCue(cue, translated) {
     lastSpoken = cue.id;
     const token = sessionToken, vid = video;
+    const offset=C.narrationSeekOffset(cue,translated,narrationAnchor,sourceRows),spoken=translated.slice(offset);
     const seconds = Math.max(0.8, (cue.end - video.currentTime + 0.5) / video.playbackRate);
-    const estimate = Math.max(0.5, [...translated].filter(ch => !/\s/.test(ch)).length / 5);
+    const estimate = Math.max(0.5, [...spoken].filter(ch => !/\s/.test(ch)).length / 5);
     const rate = C.speechRate(settings, video.playbackRate, estimate / seconds);
     const complete = settings.syncMode === 'complete';
     speechRetryAt = Date.now() + 5000;
-    speech.speak(translated, {
+    speech.speak(spoken, {
       voice: settings.voice, volume: settings.volume, rate, cue, cueEnd: cue.end + 1,
+      captionText:translated,captionOffset:offset,
       silent: !C.narrationParts(cue.text).some(part=>part.text),
       onStart: () => { if (token === sessionToken && vid === video) duckVolume(); },
       onDone: reason => {
         if (token !== sessionToken || vid !== video || reason === 'cancel') return;
-        if (complete && reason === 'end') { narration.finish(cue.id); speechRetryAt = 0; }
-        else if (complete) speechRetryAt = Date.now() + 5000;
+        if (reason === 'end') { if(complete)narration.finish(cue.id); speechRetryAt = 0; }
+        else if(reason!=='end') {lastSpoken='';speechRetryAt = Date.now() + 5000;}
         restoreVolume(); render();
         if (reason === 'end') setTimeout(tick, 0);
       }
@@ -226,6 +232,7 @@
     if (complete) narration.update(scheduler.cues, position);
     scheduler.tick(position, video.playbackRate, wall, complete ? narration.head?.start : null);
     if (complete) narration.update(scheduler.cues, position);
+    if(mediaWaiting&&video.readyState>=3&&!video.seeking)mediaWaiting=false;
     if (mediaWaiting || video.seeking || (video.paused && !video.ended)) { render(); return; }
     if (voiceNeedsGesture) { render(); return; }
     if (speech.current?.paused) speech.resume();
@@ -233,7 +240,7 @@
     const cue = complete ? narration.head : cueAt(position), text = cue && scheduler.get(cue);
     if (speech.current && settings.syncMode === 'follow' && position > (speech.current.options.cueEnd ?? Infinity)) { speech.stop(); restoreVolume(); skipped++; }
     if (cue && (complete || cue.id !== lastSpoken)) {
-      if (text && !speech.current && (!complete || wall >= speechRetryAt)) {
+      if (text && !speech.current && wall >= speechRetryAt) {
         speakCue(cue, text);
         if (speech.current) speech.current.options.cueEnd = cue.end + 1;
       }
@@ -246,29 +253,32 @@
   function bindVideo(next) {
     if (video === next) return;
     speech.stop(); restoreVolume(true); videoListeners?.abort(); video = next; mediaWaiting = false;
-    narration.reset(video?.currentTime || 0);
+    narrationAnchor=video?.currentTime||0;narration.reset(narrationAnchor);
     if (!video) return;
     videoListeners = new AbortController(); const o = {signal: videoListeners.signal};
     video.addEventListener('timeupdate', tick, o);
     video.addEventListener('pause', () => { if (!video.ended) { if (settings.syncMode === 'complete') speech.pause(); else { speech.stop(); lastSpoken = ''; } } restoreVolume(); render(); }, o);
-    video.addEventListener('play', tick, o);
+    video.addEventListener('play', () => {if(video.readyState>=3)mediaWaiting=false;tick();}, o);
+    video.addEventListener('canplay', () => {mediaWaiting=false;tick();}, o);
     video.addEventListener('waiting', () => { mediaWaiting = true; speech.pause(); restoreVolume(); }, o);
     video.addEventListener('playing', () => { mediaWaiting = false; tick(); }, o);
     video.addEventListener('seeking', () => {
       scheduler.invalidate(); fallbackText = ''; lastSpoken = ''; speechRetryAt = 0; restoreVolume();
+      scheduler.lastPos=null;scheduler.lastWall=null;
       if (sourceName.startsWith('当前屏幕')) scheduler.cues = [];
     }, o);
-    video.addEventListener('seeked', () => { narration.reset(video.currentTime); speechRetryAt = 0; tick(); }, o);
+    video.addEventListener('seeked', () => { narrationAnchor=video.currentTime;narration.reset(narrationAnchor);scheduler.lastPos=null;mediaWaiting=false;speechRetryAt = 0;tick(); }, o);
     video.addEventListener('ratechange', () => { updateSpeechRate(); restoreVolume(); tick(); }, o);
     video.addEventListener('ended', () => { mediaWaiting = false; if (settings.syncMode !== 'complete') speech.stop(); restoreVolume(); tick(); }, o);
     if (active) duckVolume();
   }
-  async function start() {
+  async function start({automatic=false}={}) {
     if (!currentId || !video) { report('请先打开一个 YouTube 视频'); return; }
     if (active) return;
     pendingStartId = ''; voiceNeedsGesture = false;
+    autoSession=automatic;
     active = true; sessionToken++; errorText = ''; lastSpoken = ''; scheduler.enabled = true;
-    narration.reset(video.currentTime); speechRetryAt = 0;
+    narrationAnchor=video.currentTime;narration.reset(narrationAnchor); speechRetryAt = 0;
     duckVolume();
     scheduler.settings = settings; speechErrors = 0; skipped = 0;
     cacheOwner = currentId;
@@ -297,6 +307,7 @@
   function stop() {
     pendingStartId = ''; voiceNeedsGesture = false;
     active = false; sessionToken++; loadSerial++; loading = false;
+    autoSession=false;
     scheduler.stop(); speech.stop(); restoreVolume(); flushCache(); sendPage('DISABLE');
     for (const job of pendingPage.values()) { clearTimeout(job.timer); job.reject(new Error('字幕读取已取消')); }
     pendingPage.clear(); lastSpoken = ''; render();
@@ -304,14 +315,17 @@
   function resetVideo(id) {
     const wasActive = active; stop();
     currentId = id; tracks = []; trackKey = ''; sourceLang = 'auto'; sourceName = ''; sourceAutomatic = false; isLive = false;
+    metadataReady=false;audioLanguage='';chineseOriginal=false;sourceRows=[];
     lastCapturedBody = null; lastCaptureUrl = ''; cacheRows = {}; dirtyCache = {}; cacheOwner = '';
     fallbackText = ''; errorText = ''; captionFailures = 0; retryAt = 0; scheduler.setCues([], 'auto');
     renderTracks(); sendPage('INSPECT');
     if (id && (settings.autoStart || wasActive)) { pendingStartId = id; pendingStartAt = Date.now() + 300; }
   }
   function tryAutoStart() {
-    if (active || !video || !pendingStartId || Date.now() < pendingStartAt || pendingStartId !== currentId || pendingStartId !== C.videoId(location.href)) return;
-    start().catch(e => report(e.message));
+    if (!settingsReady||active || !video || !pendingStartId || Date.now() < pendingStartAt || pendingStartId !== currentId || pendingStartId !== C.videoId(location.href)) return;
+    if(chineseOriginal){pendingStartId='';render();return;}
+    if(!metadataReady&&Date.now()<pendingStartAt+2000){sendPage('INSPECT');return;}
+    start({automatic:true}).catch(e => report(e.message));
   }
   function status() {
     return {
@@ -320,7 +334,7 @@
       translating: scheduler.active.size, cached: scheduler.cache.size, voice: speech.lastVoice,
       error: errorUntil > Date.now() ? errorText : '', metrics: {...scheduler.metrics, speechErrors, skipped},
       mode: settings.syncMode, settings, voices: speech.voices().map(v => ({name: v.name, lang: v.lang, local: v.localService})),
-      queued: narration.pending.length, narrationTime: narration.head?.start ?? null,
+      queued: narration.pending.length, narrationTime: narration.head?.start ?? null,chineseOriginal,audioLanguage,
       playbackRate: video?.playbackRate || 1, effectiveRate: speech.current?.options.rate ?? C.speechRate(settings, video?.playbackRate || 1), voiceNeedsGesture
     };
   }
@@ -381,6 +395,11 @@
         try { const u = new URL(t.baseUrl); return u.origin === location.origin && u.pathname === '/api/timedtext' && u.searchParams.get('v') === currentId; } catch { return false; }
       });
       isLive = !!m.live; renderTracks();
+      metadataReady=true;
+      audioLanguage=C.originalLanguage(tracks,typeof m.audioLanguage==='string'?m.audioLanguage.slice(0,35):'');
+      chineseOriginal=C.isChinese(audioLanguage);
+      if(chineseOriginal&&autoSession){stop();report('视频原声为中文，已跳过自动同传');}
+      tryAutoStart();
       if (active && !loading && !scheduler.cues.length) loadCaptions().catch(e => report(e.message));
     }
     if (m.type === 'CAPTURED') capturedBody(m.url, m.body);
@@ -422,7 +441,7 @@
   function render(override = '') {
     if (!view) return;
     const pos = video?.currentTime || 0;
-    const text = override || (!active ? '点击“开启”，用中文听视频' : loading ? '正在取得字幕，可先继续播放…' :
+    const text = override || (!active ? chineseOriginal?'视频原声为中文，已跳过自动同传':'点击“开启”，用中文听视频' : loading ? '正在取得字幕，可先继续播放…' :
       !scheduler.cues.length ? '正在等字幕；可开启 YouTube 的 CC' :
       `${sourceName || '字幕'} · ${scheduler.cues.length} 段\n已准备约 ${Math.round(scheduler.readySeconds(pos))} 秒 · 正在翻译 ${scheduler.active.size} 段\n${speech.current ? '中文朗读中' : video?.paused ? '视频已暂停' : '等待下一句'} · 原声全程限音量`);
     const complete = active && settings.syncMode === 'complete', head = complete ? narration.head : null;
@@ -433,24 +452,35 @@
     view.render({active, status: text, queueStatus, playbackRate: video?.playbackRate || 1, effectiveRate: speech.current?.options.rate ?? C.speechRate(settings, video?.playbackRate || 1), error: voiceNeedsGesture ? '浏览器需要一次页面点击才能朗读，点击视频后将继续。' : errorUntil > Date.now() ? errorText : '', translated, source: cue?.text, captionProgress, alignment:cue?.alignment, paginate: cue?.automatic === true});
   }
   function discover() {
+    if(!settingsReady)loadInitialSettings();
     const id = C.videoId(location.href);
     bindVideo(document.querySelector('#movie_player video.html5-main-video') || document.querySelector('video.html5-main-video'));
     if (id !== currentId) resetVideo(id);
     mount();
     tryAutoStart();
-    if (!tracks.length && active) sendPage('INSPECT');
+    if (!metadataReady||!tracks.length && active) sendPage('INSPECT');
     tick();
   }
   window.addEventListener('pagehide', () => stop());
   document.addEventListener('yt-navigate-finish', discover);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) discover(); });
   function resumeAfterGesture(event) {
-    if (!event.isTrusted || !active || !voiceNeedsGesture) return;
+    if (!event.isTrusted || !active || speech.current) return;
+    if(!voiceNeedsGesture&&!speechRetryAt)return;
     voiceNeedsGesture = false; speechRetryAt = 0; lastSpoken = ''; errorText = ''; tick();
   }
   document.addEventListener('pointerdown', resumeAfterGesture, {capture:true});
+  document.addEventListener('click', resumeAfterGesture, {capture:true});
   document.addEventListener('keydown', resumeAfterGesture, {capture:true});
-  rpc({type: 'GET_SETTINGS'}).then(async s => { await applySettings(s); discover(); }).catch(e => report(e.message));
+  window.speechSynthesis?.addEventListener('voiceschanged',()=>{if(active&&!speech.current&&speechRetryAt&&!voiceNeedsGesture&&speech.voices().length){errorText='';speechRetryAt=0;lastSpoken='';tick();}});
+  function loadInitialSettings(){
+    if(settingsReady||settingsLoadPending||Date.now()<settingsRetryAt)return;
+    settingsLoadPending=true;
+    rpc({type:'GET_SETTINGS'}).then(async s=>{await applySettings(s);settingsReady=true;discover();})
+      .catch(e=>{settingsRetryAt=Date.now()+3000;report(e.message);})
+      .finally(()=>{settingsLoadPending=false;});
+  }
+  loadInitialSettings();
   // Event-driven updates handle playback; this watchdog recovers missed SPA/player events.
   setInterval(discover, 1000); setInterval(() => { if (active) tick(); }, 250);
 })();

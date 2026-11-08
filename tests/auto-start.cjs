@@ -72,6 +72,22 @@ document.addEventListener('click',e=>{if(e.target.classList.contains('ytp-subtit
     assert.equal((await status()).active,false);
     await waitForState(s=>s.active&&s.settings.autoStart&&s.videoId==='auto-video-5');
     pass('Saved automatic startup still applies when settings arrive after the player watchdog has run');
+    await worker.evaluate(async()=>{
+      const saved=(await chrome.storage.local.get('settings')).settings;await chrome.storage.local.set({settings:{...saved,autoStart:false}});
+      const read=chrome.storage.local.get.bind(chrome.storage.local);let delayed=false;
+      chrome.storage.local.get=async key=>{if(key==='settings'&&!delayed){delayed=true;await new Promise(r=>setTimeout(r,2800));}return read(key);};
+    });
+    await page.goto('https://www.youtube.com/watch?v=auto-video-6');await page.waitForSelector('#progress-dub');await page.waitForTimeout(3400);
+    assert.equal((await status()).active,false);assert.equal((await status()).settings.autoStart,false);
+    pass('Slow settings do not activate default auto-start when the saved preference is disabled');
+    await worker.evaluate(async()=>{
+      const saved=(await chrome.storage.local.get('settings')).settings;await chrome.storage.local.set({settings:{...saved,autoStart:true}});
+      const read=chrome.storage.local.get.bind(chrome.storage.local);let failed=false;
+      chrome.storage.local.get=async key=>{if(key==='settings'&&!failed){failed=true;throw new Error('Temporary settings startup failure');}return read(key);};
+    });
+    await page.goto('https://www.youtube.com/watch?v=auto-video-7');await page.waitForSelector('#progress-dub');
+    await waitForState(s=>s.active&&s.videoId==='auto-video-7');
+    pass('A transient settings-service failure retries initialization and still starts automatically');
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(root,'dist/auto-start-report.json'),JSON.stringify({actualExtensionLoaded:true,fixture:true,voiceSubstituted:true,checks,errors},null,2));
   }finally{await context.close()}

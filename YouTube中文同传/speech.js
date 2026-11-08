@@ -24,10 +24,10 @@
       this.stop();
       const parts=options.silent?[{from:0,to:text.length,pause:250}]:DubCore.narrationParts(text);
       const audible=parts.some(p=>p.text);
-      if (audible && (!this.synthesis || !this.Utterance)) { this.onError(new Error('浏览器不支持语音朗读')); return; }
+      if (audible && (!this.synthesis || !this.Utterance)) { this.onError(new Error('浏览器不支持语音朗读')); options.onDone?.('unavailable'); return; }
       const token = this.token;
       const voice = this.voice(options.voice, options.offline);
-      if (audible && !voice) { this.onError(new Error('未发现中文声音，请使用 Edge 并在系统中安装中文语音')); return; }
+      if (audible && !voice) { const e=new Error('中文声音尚未就绪，将在声音加载后继续');e.code='voices-unavailable';this.onError(e);options.onDone?.('unavailable');return; }
       const offsets=parts.map(part=>part.from+(options.captionOffset||0));
       let index = 0, started = false, retried = false, generation = 0, interrupted = false;
       const current = {text, captionText: options.captionText || text, options, voice: voice?.name || '', paused: false, startedAt: Date.now(), charIndex: offsets[0] || 0, finish: options.onDone};
@@ -61,6 +61,7 @@
         }
         const utterance = new this.Utterance(parts[index].text);
         current.utterance = utterance; utterance.voice = voice; utterance.lang = voice.lang || 'zh-CN';
+        current.partMap=parts[index].map?.map(at=>at+(options.captionOffset||0));
         utterance.rate = DubCore.clamp(options.rate || 1, 0.1, 10); utterance.volume = options.volume ?? 1;
         started = false;
         const startTimer = () => {
@@ -116,7 +117,8 @@
           // A voice that reports only an initial sentence boundary at zero
           // still needs the visual-clock fallback until real progress arrives.
           current.hasBoundary ||= e.charIndex > 0;
-          current.charIndex = Math.max(current.charIndex, current.partStart + DubCore.clamp(e.charIndex, 0, parts[index].text.length - 1));
+          const at=DubCore.clamp(e.charIndex,0,parts[index].text.length-1);
+          current.charIndex = Math.max(current.charIndex,current.partMap?.[at]??current.partStart+at);
           this.onState(current);
         };
         utterance.onend = advance;
@@ -147,7 +149,8 @@
         };
         this.onState(current); startTimer();
         if (this.synthesis.paused) this.synthesis.resume();
-        this.synthesis.speak(utterance);
+        try { this.synthesis.speak(utterance); }
+        catch(error) { utterance.onerror({error:error.name==='NotAllowedError'?'not-allowed':'synthesis-failed'}); }
       };
       next();
     }
@@ -159,7 +162,8 @@
       // this never advances the narration queue or truncates an utterance.
       const now = c.paused ? (c.pausedAt ?? c.startedAt) : Date.now();
       const elapsed = Math.max(0, now - c.startedAt) / 1000;
-      return Math.min(c.partEnd - 1, c.partStart + Math.floor(elapsed * 4.5 * c.utterance.rate));
+      const estimated=Math.floor(elapsed*4.5*c.utterance.rate);
+      return Math.min(c.partEnd-1,c.partMap?c.partMap[Math.min(estimated,c.partMap.length-1)]:c.partStart+estimated);
     }
     setRate(rate) {
       if (!this.current) return;

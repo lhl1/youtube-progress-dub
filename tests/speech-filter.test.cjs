@@ -17,7 +17,7 @@ test('normal numbers, decimals, Chinese sentence punctuation and lexical apostro
   const text="你好，版本3.14已经发布！Don't worry. 数量25% + 3 = 28。";
   const spoken=C.narrationParts(text).filter(p=>p.text).map(p=>p.text);
   assert.ok(spoken.some(p=>p.includes('版本3.14已经发布！')));assert.ok(spoken.some(p=>p.includes("Don't worry.")));
-  assert.deepEqual(spoken.slice(-3),['数量25','3','28。']);
+  assert.deepEqual(spoken.slice(-3),['数量百分之二十五','3','28。']);
   assert.ok(C.narrationParts('[Music] [__] ✨ *** 。！？').every(p=>!p.text));
   assert.equal(C.narrationParts('[Music] [__] ✨ *** 。！？').length,1);
 });

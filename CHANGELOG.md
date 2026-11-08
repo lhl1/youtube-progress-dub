@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.4 — 2026-11-08
+
+- Validation: 132 unit tests pass; Edge extension fixtures cover startup, delayed voices, playback recovery and seeking. Browser scenarios substitute speech output and do not constitute an audible voice test.
+
+- Normalize Chinese book-title delimiters and percentages only for speech, keeping original caption text and mapped character offsets.
+- Skip automatic dubbing for original audio identified as Chinese; do not infer spoken language from an authored or translated Chinese caption track.
+- Wait for saved startup settings, retry transient initialization failures, recover delayed voices and retry failed follow-mode narration; preserve genuine browser activation requirements.
+- Resume long ASR narration near a seek position using timed source rows, available translation alignment and a safe clause/word boundary. Normal uninterrupted reading stays complete; authored and unknown caption rows remain unchanged.
+- Keep caption text, display styles, semantic grouping and pagination unchanged. Seek placement is approximate without word-level cross-language timing.
+
 ## 1.7.2 — 2026-10-24
 
 - Remove the page counter above captions while preserving automatic-caption pagination, bilingual display and complete narration.

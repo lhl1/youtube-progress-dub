@@ -356,6 +356,28 @@
     }
     return parts;
   }
+  function chineseNumber(value) {
+    const digits='零一二三四五六七八九', [integer,fraction]=value.replace(/,/g,'').split('.');
+    const n=integer.replace(/^0+(?=\d)/,'');
+    if(n.length>16)return [...n].map(x=>digits[x]).join('')+(fraction?'点'+[...fraction].map(x=>digits[x]).join(''):'');
+    const groups=[];for(let i=n.length;i>0;i-=4)groups.unshift(n.slice(Math.max(0,i-4),i));
+    let result='',zero=false;
+    for(let g=0;g<groups.length;g++){
+      const chunk=Number(groups[g]);if(!chunk){if(result)zero=true;continue;}
+      if(result&&(zero||chunk<1000))result+='零';zero=false;
+      const padded=String(chunk);let part='',pending=false;
+      for(let i=0;i<padded.length;i++){
+        const d=Number(padded[i]),place=padded.length-i-1;
+        if(!d){if(part)pending=true;continue;}
+        if(pending)part+='零';pending=false;
+        part+=digits[d]+['','十','百','千'][place];
+      }
+      result+=part+['','万','亿','万亿'][groups.length-g-1];
+    }
+    result=(result||'零').replace(/^一十/,'十');
+    return result+(fraction?'点'+[...fraction].map(x=>digits[x]).join(''):'');
+  }
+  const percentagePattern=/^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*[%％]/;
   function narrationParts(text, maxLength = 140) {
     text=String(text||'');const plan=[];
     const emoji=new Map(typeof Intl.Segmenter==='function'?[...new Intl.Segmenter('und',{granularity:'grapheme'}).segment(text)].filter(g=>/[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u.test(g.segment)).map(g=>[g.index,g.index+g.segment.length]):[]);
@@ -366,11 +388,28 @@
       else plan.push({from,to,pause:250});
     };
     const speak=(from,to)=>{
-      const source=text.slice(from,to);let offset=0;
+      let source='',positions=[],ends=[];
+      for(let i=from;i<to;){
+        const percent=text.slice(i,to).match(percentagePattern);
+        if(percent){
+          const raw=percent[0],number=raw.replace(/\s*[%％]$/,'').replace(/^[+-]/,'');
+          const spoken=(raw[0]==='-'?'负':raw[0]==='+'?'正':'')+'百分之'+chineseNumber(number);
+          source+=spoken;positions.push(...Array(spoken.length).fill(i));ends.push(...Array(spoken.length).fill(i+raw.length));i+=raw.length;
+        }else{
+          const c=String.fromCodePoint(text.codePointAt(i));
+          if(!/[《》]/.test(c)){source+=c;for(let j=0;j<c.length;j++){positions.push(i+j);ends.push(i+j+1);}}
+          i+=c.length;
+        }
+      }
+      let offset=0;
       for(const part of speechParts(source,maxLength)){
         const start=source.indexOf(part,offset);offset=start+part.length;
-        if(/[\p{L}\p{N}]/u.test(part))plan.push({text:part,from:from+start,to:from+offset});
-        else pause(from+start,from+offset);
+        const begin=positions[start],end=Math.max(positions[offset]??to,ends[offset-1]??from);
+        if(/[\p{L}\p{N}]/u.test(part)){
+          const item={text:part,from:begin,to:end};
+          if(text.slice(begin,end)!==part)item.map=[...positions.slice(start,offset),end];
+          plan.push(item);
+        }else pause(begin,end);
       }
     };
     const brackets=new Map([['[',']'],['［','］'],['【','】']]);
@@ -389,16 +428,53 @@
         }
         pause(start,index);from=index;continue;
       }
+      const percent=text.slice(index).match(percentagePattern);
+      if(percent){index+=percent[0].length;continue;}
       // Sentence punctuation is kept for prosody, never spoken in isolation.
       // Apostrophes inside words are lexical (can't), not symbol annotations.
       const apostrophe=/['’]/.test(char)&&/\p{L}/u.test(text[index-1]||'')&&/\p{L}/u.test(text[index+1]||'');
-      if(/[\p{P}\p{S}\u200d\ufe0e\ufe0f]/u.test(char)&&!/[。！？!?，,、；;：:….]/.test(char)&&!apostrophe){
+      if(/[\p{P}\p{S}\u200d\ufe0e\ufe0f]/u.test(char)&&!/[。！？!?，,、；;：:….《》]/.test(char)&&!apostrophe){
         speak(from,index);pause(index,index+char.length);index+=char.length;from=index;
       }else index+=char.length;
     }
     speak(from,text.length);
     if(!plan.length&&text.length)pause(0,text.length);
     return plan;
+  }
+  function originalLanguage(tracks, audioLanguage='') {
+    if(audioLanguage && audioLanguage!=='auto')return audioLanguage;
+    const languages=[...new Set(tracks.filter(t=>isAutomaticTrack(t,t.baseUrl)).map(t=>{
+      try{return new URL(t.baseUrl).searchParams.get('lang')||t.languageCode;}catch{return t.languageCode;}
+    }).filter(Boolean))];
+    // Translated or authored Chinese captions do not establish spoken language.
+    return languages.length===1?languages[0]:'';
+  }
+  function narrationSeekOffset(cue, translated, position, rows=[]) {
+    const duration=cue.end-cue.start;
+    if(cue.automatic!==true||duration<12||position-cue.start<3||position>=cue.end)return 0;
+    const fraction=clamp((position-cue.start)/duration,0,1);
+    let sourceOffset=cue.text.length*fraction;
+    // Prefer the original timed ASR row over a whole-paragraph clock estimate.
+    let cursor=0;
+    for(const row of rows){
+      if(row.end<cue.start||row.start>cue.end)continue;
+      const at=cue.text.indexOf(row.text,cursor);if(at<0)continue;cursor=at+row.text.length;
+      if(position>=row.start&&position<row.end){sourceOffset=at+row.text.length*clamp((position-row.start)/(row.end-row.start),0,1);break;}
+    }
+    const aligned=validatedAlignment(cue.alignment,cue.text,translated).find(a=>a.sourceFrom<=sourceOffset&&a.sourceTo>sourceOffset);
+    const target=aligned?aligned.from+(aligned.to-aligned.from)*clamp((sourceOffset-aligned.sourceFrom)/(aligned.sourceTo-aligned.sourceFrom),0,1):translated.length*sourceOffset/Math.max(1,cue.text.length);
+    let boundary=0;
+    for(const m of translated.matchAll(/[。！？!?；;，,：:]+[”’」』）》)]*\s*/gu))if(m.index+m[0].length<=target)boundary=m.index+m[0].length;
+    if(target-boundary>Math.max(24,translated.length/duration*8)){
+      if(typeof Intl.Segmenter==='function')for(const word of new Intl.Segmenter('zh',{granularity:'word'}).segment(translated)){if(word.index>target)break;boundary=word.index;}
+    }
+    // Do not begin in the middle of a book title, annotation or emoji cluster.
+    const pairs=new Map([['《','》'],['[',']'],['［','］'],['【','】']]),stack=[];
+    for(let i=0;i<boundary;i++){const c=translated[i];if(pairs.has(c))stack.push({at:i,end:pairs.get(c)});else if(c===stack.at(-1)?.end)stack.pop();}
+    if(stack.length)boundary=stack[0].at;
+    for(const m of translated.matchAll(/[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*[%％]/g))if(m.index<boundary&&boundary<m.index+m[0].length)boundary=m.index;
+    if(typeof Intl.Segmenter==='function')for(const g of new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(translated)){if(g.index>boundary)break;if(g.index+g.segment.length>boundary){boundary=g.index;break;}}
+    return boundary;
   }
   function isAutomaticTrack(track, url = '') {
     if (track?.kind === 'asr' || track?.vssId?.startsWith('a.')) return true;
@@ -682,7 +758,7 @@
       return Math.max(0, last - position);
     }
   }
-  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
+  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
   root.DubCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);
