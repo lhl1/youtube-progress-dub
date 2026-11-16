@@ -4,6 +4,7 @@
     constructor({synthesis = root.speechSynthesis, Utterance = root.SpeechSynthesisUtterance, onState = () => {}, onError = () => {}} = {}) {
       Object.assign(this, {synthesis, Utterance, onState, onError});
       this.token = 0; this.current = null; this.timer = null; this.resumeTimer = null; this.lastVoice = ''; this.failedVoices = new Map();
+      this.voicePreference = ''; this.lockedVoice = null;
     }
     voices() { return (this.synthesis?.getVoices() || []).filter(v => /^zh|^cmn/i.test(v.lang)).sort((a, b) => this.score(b) - this.score(a)); }
     score(v) { return (/Online|Natural|Neural/i.test(v.name) ? 100 : 0) + (/Xiaoxiao|晓晓/i.test(v.name) ? 30 : 0) + (/zh-CN/i.test(v.lang) ? 20 : 0); }
@@ -12,7 +13,11 @@
       // names remain a better hint when choosing a truly offline fallback.
       const voices = this.voices(), healthy = voices.filter(v => (this.failedVoices.get(v.name) || 0) < Date.now());
       const available = offline ? healthy.filter(v => v.localService && !/Online|Natural|Neural/i.test(v.name)) : healthy;
-      return available.find(v => v.name === name) || available[0] || (offline ? undefined : voices[0]);
+      if(!offline){
+        if(name)return voices.find(v=>v.name===name);
+        if(this.lockedVoice)return voices.find(v=>v.name===this.lockedVoice.name&&v.lang===this.lockedVoice.lang&&(!this.lockedVoice.voiceURI||v.voiceURI===this.lockedVoice.voiceURI));
+      }
+      return available.find(v=>v.name===name) || available[0] || (offline ? undefined : voices[0]);
     }
     stop(reason = 'cancel') {
       this.token++; clearTimeout(this.timer); clearTimeout(this.resumeTimer); this.timer = this.resumeTimer = null;
@@ -22,14 +27,17 @@
     }
     speak(text, options = {}) {
       this.stop();
+      const preference=options.voice||'';
+      if(preference!==this.voicePreference){this.voicePreference=preference;this.lockedVoice=null;}
       const parts=options.silent?[{from:0,to:text.length,pause:250}]:DubCore.narrationParts(text);
       const audible=parts.some(p=>p.text);
       if (audible && (!this.synthesis || !this.Utterance)) { this.onError(new Error('浏览器不支持语音朗读')); options.onDone?.('unavailable'); return; }
       const token = this.token;
-      const voice = this.voice(options.voice, options.offline);
-      if (audible && !voice) { const e=new Error('中文声音尚未就绪，将在声音加载后继续');e.code='voices-unavailable';this.onError(e);options.onDone?.('unavailable');return; }
+      const voice = this.voice(options.fallbackVoice || options.voice, options.offline);
+      if (audible && !voice) { const e=new Error(options.voice||this.lockedVoice?'原来的中文声音暂不可用，正在等待恢复；也可手动选择其他声音':'中文声音尚未就绪，将在声音加载后继续');e.code='voices-unavailable';this.onError(e);options.onDone?.('unavailable');return; }
       const offsets=parts.map(part=>part.from+(options.captionOffset||0));
-      let index = 0, started = false, retried = false, generation = 0, interrupted = false;
+      let index = 0, started = false, retried = false, generation = 0, interrupted = false, resumeRetried = false;
+      const canFallback=()=>!options.voice&&!options.offline&&!this.lockedVoice;
       const current = {text, captionText: options.captionText || text, options, voice: voice?.name || '', paused: false, startedAt: Date.now(), charIndex: offsets[0] || 0, finish: options.onDone};
       this.current = current; if(voice)this.lastVoice = voice.name;
       const finish = reason => { if (token !== this.token) return; this.token++; clearTimeout(this.timer); clearTimeout(this.resumeTimer); this.timer = this.resumeTimer = null; this.current = null; this.onState(null); options.onDone?.(reason); };
@@ -47,7 +55,7 @@
           if(!valid())return;
           generation++;clearTimeout(this.timer);clearTimeout(this.resumeTimer);this.timer=this.resumeTimer=null;
           current.charIndex=current.partEnd;current.progressStarted=false;current.utterance=null;current.resume=next;current.recoverResume=false;
-          index++;retried=false;interrupted=false;next();
+          index++;retried=false;interrupted=false;resumeRetried=false;current.wasResumed=false;next();
         };
         if(parts[index].pause){
           current.utterance=null;current.recoverResume=false;
@@ -77,8 +85,8 @@
             if (current.recoverResume) { current.recoverResume = false; restart(); return; }
             this.failedVoices.set(voice.name, Date.now() + 90000);
             const fallback = this.voice('', true);
-            if (!retried && fallback && fallback.name !== voice.name && !started) {
-              const retained = {...options, voice: fallback.name, offline: true, captionText: current.captionText, captionOffset: offsets[index]};
+            if (canFallback() && !retried && fallback && fallback.name !== voice.name && !started) {
+              const retained = {...options, fallbackVoice: fallback.name, offline: true, captionText: current.captionText, captionOffset: offsets[index]};
               this.onError(new Error('在线声音未响应，已尝试本地中文声音'));
               const remaining = text.slice(offsets[index] - (options.captionOffset || 0)); this.speak(remaining, retained); return;
             }
@@ -95,6 +103,7 @@
         current.timerRemaining = null; current.recoverResume = false;
         current.resume = () => {
           if (!valid()) return;
+          current.wasResumed = true;
           current.recoverResume = true;
           this.synthesis.resume(); startTimer();
           // Wait for resume to settle before detecting a discarded utterance.
@@ -106,7 +115,7 @@
         };
         utterance.onstart = () => {
           if (!valid()) return;
-          started = true; current.timerRemaining = null; this.failedVoices.delete(voice.name); current.startedAt = Date.now(); this.onState(current);
+          started = true; current.timerRemaining = null; this.failedVoices.delete(voice.name); this.lockedVoice={name:voice.name,lang:voice.lang,voiceURI:voice.voiceURI};current.startedAt = Date.now(); this.onState(current);
           current.progressStarted = true; if(current.paused)current.pausedAt = Date.now();
           if (current.paused) this.synthesis.pause(); else options.onStart?.();
           startTimer();
@@ -137,12 +146,19 @@
             const error = new Error('浏览器需要一次页面点击才能朗读，点击视频后将继续。'); error.code = 'not-allowed';
             this.onError(error); finish('blocked'); return;
           }
+          // Pausing can discard a cloud utterance or report a transient error.
+          // Keep its place and voice; never start an offline fallback while paused.
+          if(current.paused){
+            generation++;current.utterance=null;current.timerRemaining=null;current.recoverResume=false;current.wasResumed=true;current.resume=next;
+            clearTimeout(this.timer);clearTimeout(this.resumeTimer);this.timer=this.resumeTimer=null;this.onState(current);return;
+          }
+          if(current.wasResumed&&!resumeRetried){resumeRetried=true;restart();return;}
           this.failedVoices.set(voice.name, Date.now() + 90000);
-          if (!retried && !options.offline) {
+          if (!retried && canFallback()) {
             const fallback = this.voice('', true);
             if (fallback && fallback.name !== voice.name) {
               retried = true; this.onError(new Error('在线语音失败，切换本地中文声音'));
-              this.speak(text.slice(offsets[index] - (options.captionOffset || 0)), {...options, voice: fallback.name, offline: true, captionText: current.captionText, captionOffset: offsets[index]}); return;
+              this.speak(text.slice(offsets[index] - (options.captionOffset || 0)), {...options, fallbackVoice: fallback.name, offline: true, captionText: current.captionText, captionOffset: offsets[index]}); return;
             }
           }
           this.onError(new Error(`语音失败：${e.error || 'unknown'}`)); finish('error');

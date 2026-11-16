@@ -23,7 +23,7 @@ function voiceList(selected) {
   const name = typeof selected === 'string' ? selected : $('voice').value;
   const voices = engine.voices(); $('voice').replaceChildren(new Option('自动选择 · 优先 Edge 自然声音', ''));
   for (const v of voices) $('voice').append(new Option(`${v.name}${v.localService && !/Online|Natural|Neural/i.test(v.name) ? ' · 本地' : ' · 自然 / 在线'}`, v.name));
-  if (name && !voices.some(v => v.name === name)) $('voice').append(new Option(`${name} · 当前未提供（自动备用）`, name));
+  if (name && !voices.some(v => v.name === name)) $('voice').append(new Option(`${name} · 暂不可用（等待恢复）`, name));
   $('voice').value = name;
   $('voiceHint').textContent = voices.length ? `已发现 ${voices.length} 个中文声音。在线自然声音需要网络连接。` : '暂未发现中文声音。请用 Edge 打开本页，稍候重新获取，或在 Windows 中安装中文语音。';
 }

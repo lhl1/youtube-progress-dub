@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.5 — 2026-11-16
+
+- Keep an explicitly selected or already-started voice across pause/resume, later cues, cooldowns and voice-list refreshes; wait for the original voice if it disappears. A changed user preference can select a new voice.
+- Defer paused synthesis failures until playback resumes and retry transient resume errors once with the same voice and unfinished part. Keep completed parts, caption offsets, multiplied rate and the narration queue intact.
+- Retain offline fallback only for automatic initial selection before any voice has started. Update the unavailable-voice hint.
+- Validation: 140 unit tests pass, including 8 new voice-stability regressions; an Edge extension fixture covers paused errors, resume retries and disappearing/returning selected voices. Fixture speech output is substituted.
+
 ## 1.7.4 — 2026-11-08
 
 - Validation: 132 unit tests pass; Edge extension fixtures cover startup, delayed voices, playback recovery and seeking. Browser scenarios substitute speech output and do not constitute an audible voice test.
