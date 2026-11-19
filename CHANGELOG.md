@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.8 — 2026-11-19
+
+- Add Baidu General Text Translation with local APP ID and key settings, signed requests, and standard-plan pacing and request size.
+
 ## 1.7.7 — 2026-11-19
 
 - Add Alibaba Cloud Machine Translation General Edition as a selectable provider, using the official TranslateGeneral API.

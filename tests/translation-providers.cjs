@@ -26,8 +26,10 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
       const native = fetch;
       globalThis.googleCalls = 0;
       globalThis.aliyunCalls = [];
+      globalThis.baiduCalls = [];
       const originalContains = chrome.permissions.contains.bind(chrome.permissions);
-      chrome.permissions.contains = details => details.origins?.includes('https://mt.aliyuncs.com/*')
+      const fixtureOrigins = ['https://mt.aliyuncs.com/*', 'https://fanyi-api.baidu.com/*'];
+      chrome.permissions.contains = details => details.origins?.some(origin => fixtureOrigins.includes(origin))
         ? Promise.resolve(true) : originalContains(details);
       globalThis.fetch = async (url, options) => {
         if (String(url).startsWith('https://translate.googleapis.com/')) {
@@ -37,6 +39,10 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
         if (url === 'https://mt.aliyuncs.com/') {
           aliyunCalls.push({body: Object.fromEntries(new URLSearchParams(options.body)), action: options.headers['x-acs-action']});
           return Response.json({Code: 200, Data: {Translated: '来自阿里云的译文。'}});
+        }
+        if (url === 'https://fanyi-api.baidu.com/api/trans/vip/translate') {
+          baiduCalls.push(Object.fromEntries(new URLSearchParams(options.body)));
+          return Response.json({trans_result: [{dst: '这是百度通用文本翻译。'}]});
         }
         return native(url, options);
       };
@@ -95,7 +101,8 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     await options.waitForFunction(() => document.querySelector('#provider').value === 'youtube');
     await options.evaluate(() => {
       const request = chrome.permissions.request.bind(chrome.permissions);
-      chrome.permissions.request = details => details.origins?.includes('https://mt.aliyuncs.com/*')
+      const fixtureOrigins = ['https://mt.aliyuncs.com/*', 'https://fanyi-api.baidu.com/*'];
+      chrome.permissions.request = details => details.origins?.some(origin => fixtureOrigins.includes(origin))
         ? Promise.resolve(true) : request(details);
     });
     await options.locator('#provider').selectOption('aliyun');
@@ -103,7 +110,6 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     await options.locator('#aliyunAccessKeySecret').fill('ExampleSecret');
     await options.locator('button[type=submit]').click();
     await options.waitForFunction(() => document.querySelector('#message').textContent.includes('已保存'));
-    await options.close();
     const ali = await check('aliyun-selected', null, state => state.readySeconds > 0);
     assert.equal(ali.settings.provider, 'aliyun');
     assert.equal(ali.settings.aliyunConfigured, true);
@@ -113,6 +119,21 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
       call.body.SourceText.includes('This is a complete sentence.')));
     assert.equal(await worker.evaluate(() => googleCalls), googleCallsAfterFallback);
     console.log('PASS Aliyun settings save through the UI and the player receives the official API fixture translation');
+    await options.locator('#provider').selectOption('baidu');
+    await options.locator('#baiduAppId').fill('12345');
+    await options.locator('#baiduSecret').fill('FixtureSigningSecret');
+    await options.locator('button[type=submit]').click();
+    await options.waitForFunction(() => document.querySelector('#message').textContent.includes('已保存'));
+    await options.close();
+    const baidu = await check('baidu-selected', null, state => state.readySeconds > 0);
+    assert.equal(baidu.settings.provider, 'baidu');
+    assert.equal(baidu.settings.baiduConfigured, true);
+    assert.ok(!baidu.settings.baiduAppId && !baidu.settings.baiduSecret);
+    const baiduRequests = await worker.evaluate(() => baiduCalls);
+    assert.ok(baiduRequests.some(call => call.to === 'zh' && call.appid === '12345' &&
+      /^[0-9a-f]{32}$/.test(call.sign) && call.q.includes('This is a complete sentence.')));
+    assert.equal(await worker.evaluate(() => googleCalls), googleCallsAfterFallback);
+    console.log('PASS Baidu settings save through the UI and the player receives a signed API fixture translation');
   } finally {
     await context.close();
   }

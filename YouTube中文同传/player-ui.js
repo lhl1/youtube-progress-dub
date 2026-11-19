@@ -60,7 +60,7 @@
               <div class="actions"><button type="button" class="export">导出已准备字幕</button></div>
             </details>
             <details><summary>翻译服务与缓存</summary>
-              <label class="select-row"><span>翻译服务</span><select name="provider" aria-label="翻译服务"><option value="google-free">Google 翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0</option><option value="aliyun">阿里云机器翻译</option><option value="custom">已配置的自定义服务</option></select></label>
+              <label class="select-row"><span>翻译服务</span><select name="provider" aria-label="翻译服务"><option value="google-free">Google 翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0</option><option value="aliyun">阿里云机器翻译</option><option value="baidu">百度翻译 · 通用文本翻译</option><option value="custom">已配置的自定义服务</option></select></label>
               <p class="provider-hint hint"></p>
               <div class="actions"><button type="button" class="advanced">配置接口与密钥 ↗</button><button type="button" class="clear-cache">清除译文缓存</button><button type="button" class="reset">恢复推荐设置</button></div>
               <p class="hint">首次配置接口或授权服务域名时，才需要打开扩展设置页。</p>
@@ -100,7 +100,8 @@
         input.addEventListener(['range','color'].includes(input.type) ? 'input' : 'change', () => {
           const value = input.type === 'checkbox' ? input.checked : input.type === 'range' ? Number(input.value) : input.value;
           if (input.name === 'provider' && (value === 'custom' && !this.settings.endpoint ||
-              value === 'azure' && !this.settings.azureConfigured || value === 'aliyun' && !this.settings.aliyunConfigured)) {
+              value === 'azure' && !this.settings.azureConfigured || value === 'aliyun' && !this.settings.aliyunConfigured ||
+              value === 'baidu' && !this.settings.baiduConfigured)) {
             input.value = this.settings.provider; this.message('请先在“配置接口与密钥”中授权翻译服务。'); return;
           }
           this.changeSettings({[input.name]: value});
@@ -204,6 +205,7 @@
         youtube: '直接使用 YouTube 的中文字幕或中文译轨。若取不到，可在 YouTube 的字幕菜单中选择自动翻译 → 中文。',
         azure: '通过微软 Translator 翻译。请在“配置接口与密钥”中填写密钥和资源区域。',
         aliyun: '使用阿里云机器翻译通用版。密钥可在“配置接口与密钥”中设置。',
+        baidu: '使用百度通用文本翻译。APP ID 和密钥可在“配置接口与密钥”中设置。',
         custom: this.settings.endpoint ? `已配置：${this.settings.model || '自定义模型'}` : '请在“配置接口与密钥”中设置翻译地址。'
       };
       this.text(this.shadow.querySelector('.provider-hint'), hints[this.settings.provider]);

@@ -18,7 +18,8 @@ function harness(existing = {}, fetchImpl = async () => new Response('[[["你好
     webRequest: {onCompleted: {addListener(fn) { listeners.web = fn; }}}
   };
   const context = vm.createContext({chrome, DubCore: C, importScripts() {}, fetch: fetchImpl, URL, URLSearchParams,
-    AbortController, setTimeout, clearTimeout, console, Date, Response, crypto: webcrypto, TextEncoder});
+    AbortController, AbortSignal, setTimeout, clearTimeout, console, Date, Response, crypto: webcrypto, TextEncoder});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../YouTube中文同传/baidu-signature.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../YouTube中文同传/background.js'), 'utf8'), context);
   const yt = {url: 'https://www.youtube.com/watch?v=test-id', frameId: 0, tab: {id: 7}}, popup = {url: 'chrome-extension://test/popup.html'};
   const rpc = (m, sender = yt) => new Promise(resolve => listeners.message(m, sender, resolve));
@@ -198,6 +199,59 @@ test('Aliyun handles missing permission, untranslated Chinese and service errors
   const blocked = await limited.rpc(request);
   assert.match(blocked.error, /阿里云机器翻译限流/);
   assert.equal(blocked.retryAfter, 40);
+});
+
+test('Baidu signs UTF-8 text and paces standard-plan requests while retaining long captions', async () => {
+  const appid = '2015063000000001', secret = 'FixtureSigningSecret';
+  const source = ("It costs 50% + fees & tax. 你好😀. ".repeat(31) + '\nA full sentence at the end.').repeat(2);
+  const calls = [];
+  const h = harness({contains: async ({origins}) => origins.join() === 'https://fanyi-api.baidu.com/*'}, async (url, options) => {
+    assert.equal(url, 'https://fanyi-api.baidu.com/api/trans/vip/translate');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.redirect, 'error');
+    const data = Object.fromEntries(new URLSearchParams(options.body));
+    assert.equal(data.appid, appid);
+    assert.equal(data.sign, createHash('md5').update(appid + data.q + data.salt + secret, 'utf8').digest('hex'));
+    assert.ok(!options.body.includes(secret));
+    assert.ok(data.q.length <= 1000);
+    assert.equal(data.from, 'jp');
+    assert.equal(data.to, 'zh');
+    calls.push({...data, at: Date.now()});
+    return Response.json({trans_result: [{src: data.q, dst: '一段译文。'}, {src: 'next', dst: '第二行。'}]});
+  });
+  const save = await h.rpc({type: 'SAVE_SETTINGS', settings: {provider: 'baidu', baiduAppId: appid, baiduSecret: secret}}, h.popup);
+  assert.equal(save.data.baiduConfigured, true);
+  const page = (await h.rpc({type: 'GET_SETTINGS'})).data;
+  assert.equal('baiduAppId' in page, false);
+  assert.equal('baiduSecret' in page, false);
+  assert.equal((await h.rpc({type: 'SAVE_PLAYER_SETTINGS', settings: {baiduSecret: 'overwrite'}})).ok, false);
+  const request = {type: 'TRANSLATE', requestId: 'baidu-long', language: 'ja-JP', text: source};
+  const result = await h.rpc(request);
+  assert.ok(result.ok, result.error);
+  assert.ok(calls.length >= 2);
+  assert.equal(calls.map(call => call.q).join(''), source);
+  assert.equal(result.data.text, calls.map(() => '一段译文。\n第二行。').join('\n'));
+  assert.equal(new Set(calls.map(call => call.salt)).size, calls.length);
+  assert.ok(calls.slice(1).every((call, i) => call.at - calls[i].at >= 1050));
+});
+
+test('Baidu respects optional access and defers requests after a quota response', async () => {
+  const settings = {provider: 'baidu', baiduAppId: '12345', baiduSecret: 'FixtureSigningSecret'};
+  const req = {type: 'TRANSLATE', requestId: 'baidu-rate', text: 'The subtitle.', language: 'auto'};
+  const denied = harness({local: {settings}, contains: async () => false}, () => assert.fail('Unexpected fetch'));
+  assert.match((await denied.rpc(req)).error, /保存并授权/);
+  let calls = 0;
+  const limited = harness({local: {settings}}, async () => {
+    calls++;
+    return Response.json({error_code: '54003'});
+  });
+  const first = await limited.rpc(req);
+  assert.match(first.error, /限流/);
+  assert.equal(first.retryAfter, 5);
+  const second = await limited.rpc(req, {...limited.yt, tab: {id: 14}});
+  assert.equal(second.ok, false);
+  assert.equal(calls, 1);
 });
 
 test('long complete requests and translations survive the worker and persisted cache without silent slicing',async()=>{

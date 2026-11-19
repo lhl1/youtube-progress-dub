@@ -1,8 +1,11 @@
-importScripts('core.js');
+importScripts('core.js', 'baidu-signature.js');
 'use strict';
 const C = DubCore;
 const controllers = new Map();
 let googleRetryAt = 0;
+let baiduRequests = Promise.resolve();
+let baiduNextAt = 0;
+let baiduRetryAt = 0;
 let cacheWrites = Promise.resolve();
 let audioClaims = Promise.resolve();
 let settingsWrites = Promise.resolve();
@@ -125,11 +128,101 @@ async function translateAliyun(text, language, config, signal) {
   }
   return result.trim();
 }
+function waitForBaidu(ms, signal) {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const abort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', abort, {once: true});
+  });
+}
+function baiduError(message, retryAfter = 0) {
+  const error = new Error(`百度通用文本翻译${message}`);
+  error.retryAfter = retryAfter;
+  return error;
+}
+function requestBaidu(text, from, config, signal) {
+  const task = baiduRequests.then(async () => {
+    signal.throwIfAborted();
+    if (Date.now() < baiduRetryAt) throw baiduError('限流，稍后自动重试', Math.ceil((baiduRetryAt - Date.now()) / 1000));
+    if (Date.now() < baiduNextAt) await waitForBaidu(baiduNextAt - Date.now(), signal);
+    signal.throwIfAborted();
+    const salt = Array.from(crypto.getRandomValues(new Uint32Array(2)), n => String(n).padStart(10, '0')).join('');
+    const sign = baiduMd5(config.baiduAppId + text + salt + config.baiduSecret);
+    const body = new URLSearchParams({q: text, from, to: 'zh', appid: config.baiduAppId, salt, sign});
+    baiduNextAt = Date.now() + 1100;
+    let data;
+    try {
+      data = JSON.parse(await fetchLimited(C.baiduEndpoint, {method: 'POST', credentials: 'omit',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}, body: body.toString()}, signal, 10000));
+    } catch (error) {
+      if (error.status === 429) {
+        baiduRetryAt = Date.now() + error.retryAfter * 1000;
+        throw baiduError('限流，稍后自动重试', error.retryAfter);
+      }
+      throw error;
+    }
+    const code = String(data?.error_code ?? '');
+    if (code && code !== '0' && code !== '52000') {
+      if (['54003', '54005'].includes(code)) {
+        baiduRetryAt = Date.now() + 5000;
+        throw baiduError(`限流（${code}），稍后自动重试`, 5);
+      }
+      const hints = {
+        52003: '未授权，请检查 APP ID 和服务开通状态',
+        54001: '签名校验失败，请检查密钥',
+        54004: '余额不足，请检查百度翻译账户',
+        58000: '拒绝当前 IP，请检查平台的 IP 白名单',
+        58001: '暂不支持当前语言',
+        58002: '服务已关闭，请检查开通状态',
+        58003: '认证或计费异常，请检查百度翻译开放平台'
+      };
+      const hint = hints[code];
+      throw baiduError(`${hint || '请求失败'}${/^\d+$/.test(code) ? `（${code}）` : ''}`, hint ? 60 : 0);
+    }
+    if (!Array.isArray(data?.trans_result) || !data.trans_result.length ||
+        data.trans_result.some(row => typeof row?.dst !== 'string' || !row.dst.trim())) {
+      throw baiduError('未返回有效译文');
+    }
+    return data.trans_result.map(row => row.dst.trim()).join('\n');
+  });
+  baiduRequests = task.catch(() => {});
+  return task;
+}
+async function translateBaidu(text, language, config, signal) {
+  if (!C.hasBaiduCredentials(config)) throw baiduError('需要百度翻译开放平台的 APP ID 和密钥');
+  if (!await chrome.permissions.contains({origins: [C.permissionOrigin(C.baiduEndpoint)]})) {
+    throw baiduError('需要在扩展设置中保存并授权');
+  }
+  const primary = language.toLowerCase().split('-')[0];
+  const languages = {en:'en', ja:'jp', ko:'kor', fr:'fra', es:'spa', de:'de', ru:'ru', pt:'pt', it:'it', ar:'ara',
+    th:'th', vi:'vie', nl:'nl', pl:'pl', sv:'swe', tr:'tr', el:'el', da:'dan', fi:'fin', cs:'cs', hu:'hu', ro:'rom'};
+  const from = Object.hasOwn(languages, primary) ? languages[primary] : 'auto';
+  const deadline = AbortSignal.timeout(15000);
+  const combined = AbortSignal.any([signal, deadline]);
+  try {
+    const results = [];
+    // The standard plan allows 1,000 characters per request and one request per second.
+    for (const part of C.splitTranslationText(text, 1000)) {
+      if (part.trim()) results.push(await requestBaidu(part, from, config, combined));
+    }
+    const result = results.join('\n');
+    if (!result || result.length > 12000) throw baiduError('未返回有效完整译文');
+    return result;
+  } catch (error) {
+    if (deadline.aborted && !signal.aborted) throw baiduError('等待或请求超时，稍后自动重试');
+    throw error;
+  }
+}
 async function translate(text, language, config, signal, {automatic=false, source=text, before="", after=""}={}) {
   if (C.isChinese(language)) return text;
   if (config.provider === 'youtube') throw new Error('当前视频没有可读的 YouTube 中文译轨');
   if (config.provider === 'azure') return translateAzure(text, config, signal);
   if (config.provider === 'aliyun') return translateAliyun(text, language, config, signal);
+  if (config.provider === 'baidu') return translateBaidu(text, language, config, signal);
   if (config.provider === 'custom') {
     const u = new URL(config.endpoint);
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname))) throw new Error('翻译地址需要 HTTPS 或本机地址');
@@ -238,7 +331,7 @@ async function handle(m, sender) {
     const task = settingsWrites.then(async () => {
       const previous = await settings(), s = C.sanitizeSettings({...previous, ...m.settings});
       if (['provider', 'endpoint', 'apiKey', 'model', 'azureKey', 'azureRegion', 'azureFallback',
-        'aliyunAccessKeyId', 'aliyunAccessKeySecret'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
+        'aliyunAccessKeyId', 'aliyunAccessKeySecret', 'baiduAppId', 'baiduSecret'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
       await chrome.storage.local.set({settings: s});
       const tabs = await chrome.tabs.query({url: 'https://www.youtube.com/*'});
       for (const tab of tabs) chrome.tabs.sendMessage(tab.id, {type: 'SETTINGS_CHANGED', settings: C.publicSettings(s)}).catch(() => {});
