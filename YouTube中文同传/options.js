@@ -1,7 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let saved = {...DubCore.defaults};
-const fields = [...DubCore.playerSettingKeys, 'endpoint', 'model', 'apiKey', 'azureKey', 'azureRegion', 'azureFallback'];
+const fields = [...DubCore.playerSettingKeys, 'endpoint', 'model', 'apiKey', 'azureKey', 'azureRegion', 'azureFallback',
+  'aliyunAccessKeyId', 'aliyunAccessKeySecret'];
 const captionStyle=document.createElement('style');captionStyle.textContent=DubSubtitles.css;document.head.appendChild(captionStyle);
 $('captionSettings').innerHTML=DubSubtitles.controlsMarkup();
 const engine = new DubSpeech({onError: e => { $('voiceMessage').textContent = e.message; }});
@@ -12,6 +13,7 @@ function labels() {
   $('lookaheadValue').textContent = `${$('lookahead').value} 秒`;
   $('customFields').classList.toggle('hidden', $('provider').value !== 'custom');
   $('azureFields').classList.toggle('hidden', !['azure', 'google-free'].includes($('provider').value));
+  $('aliyunFields').classList.toggle('hidden', $('provider').value !== 'aliyun');
   const captionSettings={...saved};
   for(const key of DubCore.subtitleSettingKeys){const e=$(key);captionSettings[key]=e.type==='checkbox'?e.checked:e.type==='range'?Number(e.value):e.value;}
   DubSubtitles.refreshControls($('captionSettings'),captionSettings);
@@ -41,6 +43,11 @@ $('form').addEventListener('submit', async event => {
   const next = {...saved};
   for (const key of fields) { const e = $(key); next[key] = e.type === 'checkbox' ? e.checked : e.type === 'range' ? Number(e.value) : e.value.trim(); }
   try {
+    if (next.provider === 'aliyun') {
+      if (!DubCore.hasAliyunCredentials(next)) throw new Error('请填写有效的阿里云 AccessKey ID 和 Secret');
+      const origin = DubCore.permissionOrigin(DubCore.aliyunEndpoint);
+      if (!await chrome.permissions.request({origins: [origin]})) throw new Error('未授权阿里云机器翻译，设置未保存');
+    }
     if (next.provider === 'azure' || (next.provider === 'google-free' && next.azureFallback)) {
       if (!next.azureKey) throw new Error('请填写 Azure Translator 密钥');
       if (next.azureRegion && !/^[a-z0-9-]{1,64}$/i.test(next.azureRegion)) throw new Error('请填写 Azure 资源的区域代码，例如 eastasia');

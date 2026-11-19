@@ -25,10 +25,18 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     await worker.evaluate(async () => {
       const native = fetch;
       globalThis.googleCalls = 0;
+      globalThis.aliyunCalls = [];
+      const originalContains = chrome.permissions.contains.bind(chrome.permissions);
+      chrome.permissions.contains = details => details.origins?.includes('https://mt.aliyuncs.com/*')
+        ? Promise.resolve(true) : originalContains(details);
       globalThis.fetch = async (url, options) => {
         if (String(url).startsWith('https://translate.googleapis.com/')) {
           globalThis.googleCalls++;
           return new Response('', {status: 429, headers: {'Retry-After': '45'}});
+        }
+        if (url === 'https://mt.aliyuncs.com/') {
+          aliyunCalls.push({body: Object.fromEntries(new URLSearchParams(options.body)), action: options.headers['x-acs-action']});
+          return Response.json({Code: 200, Data: {Translated: '来自阿里云的译文。'}});
         }
         return native(url, options);
       };
@@ -46,7 +54,7 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
       return route.fulfill({json: {events}});
     });
     async function check(id, provider, ready) {
-      await worker.evaluate(async provider => {
+      if (provider) await worker.evaluate(async provider => {
         await chrome.storage.local.set({settings: {...DubCore.defaults, autoStart: true, provider}});
       }, provider);
       const page = await context.newPage();
@@ -81,6 +89,30 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     await check('unavailable', 'youtube', state => /未取得 YouTube 中文译轨/.test(state.error));
     assert.equal(await worker.evaluate(() => googleCalls), googleCallsAfterFallback);
     console.log('PASS Missing YouTube translation gives a clear error without using external services');
+    const options = await context.newPage();
+    const extensionId = new URL(worker.url()).host;
+    await options.goto(`chrome-extension://${extensionId}/options.html`);
+    await options.waitForFunction(() => document.querySelector('#provider').value === 'youtube');
+    await options.evaluate(() => {
+      const request = chrome.permissions.request.bind(chrome.permissions);
+      chrome.permissions.request = details => details.origins?.includes('https://mt.aliyuncs.com/*')
+        ? Promise.resolve(true) : request(details);
+    });
+    await options.locator('#provider').selectOption('aliyun');
+    await options.locator('#aliyunAccessKeyId').fill('ExampleId');
+    await options.locator('#aliyunAccessKeySecret').fill('ExampleSecret');
+    await options.locator('button[type=submit]').click();
+    await options.waitForFunction(() => document.querySelector('#message').textContent.includes('已保存'));
+    await options.close();
+    const ali = await check('aliyun-selected', null, state => state.readySeconds > 0);
+    assert.equal(ali.settings.provider, 'aliyun');
+    assert.equal(ali.settings.aliyunConfigured, true);
+    assert.ok(!ali.settings.aliyunAccessKeyId && !ali.settings.aliyunAccessKeySecret);
+    const calls = await worker.evaluate(() => aliyunCalls);
+    assert.ok(calls.some(call => call.action === 'TranslateGeneral' && call.body.TargetLanguage === 'zh' &&
+      call.body.SourceText.includes('This is a complete sentence.')));
+    assert.equal(await worker.evaluate(() => googleCalls), googleCallsAfterFallback);
+    console.log('PASS Aliyun settings save through the UI and the player receives the official API fixture translation');
   } finally {
     await context.close();
   }

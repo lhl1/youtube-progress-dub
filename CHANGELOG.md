@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.7 — 2026-11-19
+
+- Add Alibaba Cloud Machine Translation General Edition as a selectable provider, using the official TranslateGeneral API.
+- Store Alibaba Cloud credentials in trusted local extension storage and sign the requests in the worker.
+- Retry YouTube fallback after the current caption load completes if Google is rate-limited during that load.
+
 ## 1.7.6 — 2026-11-19
 
 - Add a keyless YouTube-only translation option for available Chinese caption tracks, including translated ASR tracks.

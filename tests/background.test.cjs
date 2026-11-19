@@ -1,6 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
+const {createHash, createHmac, webcrypto} = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const C = require('../YouTube中文同传/core.js');
@@ -16,7 +17,8 @@ function harness(existing = {}, fetchImpl = async () => new Response('[[["你好
     tabs: {query: async () => [], sendMessage: async (id, msg) => { sent.push({id, msg}); }, onRemoved: {addListener(fn) { listeners.removed = fn; }}},
     webRequest: {onCompleted: {addListener(fn) { listeners.web = fn; }}}
   };
-  const context = vm.createContext({chrome, DubCore: C, importScripts() {}, fetch: fetchImpl, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, console, Date, Response});
+  const context = vm.createContext({chrome, DubCore: C, importScripts() {}, fetch: fetchImpl, URL, URLSearchParams,
+    AbortController, setTimeout, clearTimeout, console, Date, Response, crypto: webcrypto, TextEncoder});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../YouTube中文同传/background.js'), 'utf8'), context);
   const yt = {url: 'https://www.youtube.com/watch?v=test-id', frameId: 0, tab: {id: 7}}, popup = {url: 'chrome-extension://test/popup.html'};
   const rpc = (m, sender = yt) => new Promise(resolve => listeners.message(m, sender, resolve));
@@ -131,6 +133,71 @@ test('explicit YouTube and unapproved Azure modes never send a caption to Google
   assert.match((await h.rpc(request)).error, /YouTube 中文译轨/);
   await h.rpc({type: 'SAVE_SETTINGS', settings: {provider: 'azure'}}, h.popup);
   assert.match((await h.rpc(request)).error, /授权微软翻译/);
+});
+
+test('Aliyun signs the exact TranslateGeneral request and protects both credentials from the page', async () => {
+  const id = 'ExampleAccessKeyId', secret = 'ExampleSigningSecret';
+  const text = "A & B + 你好? * 50%";
+  const nonces = new Set();
+  const h = harness({contains: async ({origins}) => origins.join() === 'https://mt.aliyuncs.com/*'},
+    async (url, options) => {
+      assert.equal(url, 'https://mt.aliyuncs.com/');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.credentials, 'omit');
+      assert.equal(options.redirect, 'error');
+      assert.deepEqual(Object.fromEntries(new URLSearchParams(options.body)), {
+        FormatType: 'text', SourceLanguage: 'en', TargetLanguage: 'zh', SourceText: text, Scene: 'general'
+      });
+      const headers = options.headers;
+      assert.equal(headers['x-acs-action'], 'TranslateGeneral');
+      assert.equal(headers['x-acs-version'], '2018-10-12');
+      assert.match(headers['x-acs-date'], /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+      nonces.add(headers['x-acs-signature-nonce']);
+      const digest = value => createHash('sha256').update(value).digest('hex');
+      const payloadHash = digest(options.body);
+      assert.equal(headers['x-acs-content-sha256'], payloadHash);
+      const signedNames = 'content-type;host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version';
+      const regular = {...headers, host: 'mt.aliyuncs.com'};
+      const canonical = 'POST\n/\n\n' + signedNames.split(';').map(name => name+':'+regular[name]+'\n').join('') +
+        '\n'+signedNames+'\n'+payloadHash;
+      const signature = createHmac('sha256', secret).update('ACS3-HMAC-SHA256\n'+digest(canonical)).digest('hex');
+      assert.equal(headers.authorization, `ACS3-HMAC-SHA256 Credential=${id},SignedHeaders=${signedNames},Signature=${signature}`);
+      assert.ok(!JSON.stringify({url, options}).includes(secret));
+      return Response.json({Code: 200, Data: {Translated: '完整译文。'}});
+    });
+  const saved = await h.rpc({type: 'SAVE_SETTINGS', settings: {provider: 'aliyun', aliyunAccessKeyId: id, aliyunAccessKeySecret: secret}}, h.popup);
+  assert.equal(saved.data.aliyunConfigured, true);
+  const publicData = (await h.rpc({type: 'GET_SETTINGS'})).data;
+  assert.equal('aliyunAccessKeyId' in publicData, false);
+  assert.equal('aliyunAccessKeySecret' in publicData, false);
+  const rejected = await h.rpc({type: 'SAVE_PLAYER_SETTINGS', settings: {aliyunAccessKeySecret: 'replaced'}});
+  assert.equal(rejected.ok, false);
+  for (let i = 0; i < 2; i++) {
+    const reply = await h.rpc({type: 'TRANSLATE', requestId: `ali-${i}`, language: 'en-US', text, automatic: true});
+    assert.equal(reply.data.text, '完整译文。');
+  }
+  assert.equal(nonces.size, 2);
+});
+
+test('Aliyun handles missing permission, untranslated Chinese and service errors without another provider', async () => {
+  const settings = {provider: 'aliyun', aliyunAccessKeyId: 'ExampleId', aliyunAccessKeySecret: 'ExampleSecret'};
+  const request = {type: 'TRANSLATE', requestId: 'ali-error', language: 'auto', text: 'A caption'};
+  const denied = harness({local: {settings}, contains: async () => false}, () => assert.fail('Unexpected provider call'));
+  assert.match((await denied.rpc(request)).error, /授权阿里云/);
+  const chinese = await denied.rpc({...request, text: '中文原文', language: 'zh-Hans'});
+  assert.equal(chinese.data.text, '中文原文');
+  const h = harness({local: {settings}}, async (url, options) => {
+    assert.equal(new URL(url).hostname, 'mt.aliyuncs.com');
+    assert.equal(new URLSearchParams(options.body).get('SourceLanguage'), 'auto');
+    return Response.json({Code: 10010, Message: 'not enrolled'});
+  });
+  const response = await h.rpc(request);
+  assert.match(response.error, /尚未开通/);
+  assert.equal(response.retryAfter, 60);
+  const limited = harness({local: {settings}}, async () => new Response('', {status: 429, headers: {'Retry-After': '40'}}));
+  const blocked = await limited.rpc(request);
+  assert.match(blocked.error, /阿里云机器翻译限流/);
+  assert.equal(blocked.retryAfter, 40);
 });
 
 test('long complete requests and translations survive the worker and persisted cache without silent slicing',async()=>{

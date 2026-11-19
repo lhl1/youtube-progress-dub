@@ -4,7 +4,7 @@
   let settings = {...C.defaults}, currentId = '', active = false, video = null, videoListeners = null;
   let tracks = [], trackKey = '', sourceLang = 'auto', sourceName = '', sourceAutomatic = false, isLive = false;
   let loading = false, loadSerial = 0, retryAt = 0, captionFailures = 0, lastCaptionRefresh = 0;
-  let triedYouTubeFallback = false;
+  let triedYouTubeFallback = false, youtubeFallbackPending = false;
   let lastCaptureUrl = '', lastCapturedBody = null, fallbackText = '';
   let cacheRows = {}, dirtyCache = {}, cacheTimer = null, cacheOwner = '';
   let errorText = '', errorUntil = 0, lastSpoken = '', mediaWaiting = false, speechRetryAt = 0;
@@ -27,10 +27,10 @@
     },
     onError: error => {
       report(error.message);
-      if (!error.youtubeFallback || triedYouTubeFallback || loading || isLive ||
-          !settings.autoTranslate || settings.provider !== 'google-free' || scheduler.cache.size) return;
-      triedYouTubeFallback = true;
-      loadCaptions(true, {fallback: true}).catch(e => report(e.message));
+      if (error.youtubeFallback) {
+        youtubeFallbackPending = true;
+        tryYouTubeFallback();
+      }
     },
     onReset: () => { speech.stop(); restoreVolume(); lastSpoken = ''; narrationAnchor=video?.currentTime||0; narration.reset(narrationAnchor); }
   });
@@ -138,6 +138,14 @@
       if (rows.length) installRows(rows, lang, C.isChinese(lang), `已捕获 ${lang} 字幕${isLive ? '（直播）' : ''}`, {liveAppend: isLive && sourceLang === lang, automatic: capturedAutomatic(url)});
     } catch (e) { report(e.message); }
   }
+  function tryYouTubeFallback() {
+    if (!youtubeFallbackPending || loading) return;
+    youtubeFallbackPending = false;
+    if (!active || triedYouTubeFallback || isLive || !settings.autoTranslate ||
+        settings.provider !== 'google-free' || scheduler.cache.size) return;
+    triedYouTubeFallback = true;
+    loadCaptions(true, {fallback: true}).catch(error => report(error.message));
+  }
   async function loadCaptions(force = false, {fallback = false} = {}) {
     if (!active || loading || (!force && Date.now() < retryAt)) return;
     if (!tracks.length && !lastCaptureUrl) { sendPage('INSPECT'); retryAt = Date.now() + 4000; return; }
@@ -205,7 +213,13 @@
       sendPage('INSPECT');
       retryAt = Date.now() + Math.min(60000, 3000 * 2 ** Math.min(captionFailures, 4));
       report(`${e.message}；将自动重试，也可使用当前屏幕字幕`, 15000);
-    } finally { if (serial === loadSerial) loading = false; render(); }
+    } finally {
+      if (serial === loadSerial) {
+        loading = false;
+        tryYouTubeFallback();
+      }
+      render();
+    }
   }
   function duckVolume() {
     if (active && video) sessionVolume.start(video, settings.originalVolume);
@@ -312,7 +326,7 @@
   async function start({automatic=false}={}) {
     if (!currentId || !video) { report('请先打开一个 YouTube 视频'); return; }
     if (active) return;
-    pendingStartId = ''; voiceNeedsGesture = false; triedYouTubeFallback = false;
+    pendingStartId = ''; voiceNeedsGesture = false; triedYouTubeFallback = youtubeFallbackPending = false;
     autoSession=automatic;
     active = true; sessionToken++; errorText = ''; lastSpoken = ''; scheduler.enabled = true;
     narrationAnchor=video.currentTime;narration.reset(narrationAnchor); speechRetryAt = 0;
@@ -389,7 +403,7 @@
     const old = settings; settings = C.sanitizeSettings(next); scheduler.settings = settings;
     if (active) duckVolume();
     if (active && (old.provider !== settings.provider || old.cacheRevision !== settings.cacheRevision || old.autoTranslate !== settings.autoTranslate)) {
-      loadSerial++; loading = false; triedYouTubeFallback = false; sourceName = '';
+      loadSerial++; loading = false; triedYouTubeFallback = youtubeFallbackPending = false; sourceName = '';
       scheduler.setCues([], sourceLang); scheduler.enabled = true; loadCaptions(true).catch(e => report(e.message));
     }
     if (old.syncMode !== settings.syncMode || old.voice !== settings.voice) {
@@ -456,7 +470,7 @@
         if (!active) start(); else { if (!scheduler.cues.length || sourceName.startsWith('当前屏幕')) loadCaptions(true).catch(e => report(e.message)); tick(); }
       },
       onTrack: key => {
-        trackKey = key; lastSpoken = ''; loadSerial++; loading = false; triedYouTubeFallback = false;
+        trackKey = key; lastSpoken = ''; loadSerial++; loading = false; triedYouTubeFallback = youtubeFallbackPending = false;
         scheduler.setCues([], sourceLang); scheduler.enabled = active;
         if (active) loadCaptions(true).catch(e => report(e.message));
       },

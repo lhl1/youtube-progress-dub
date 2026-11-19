@@ -59,10 +59,77 @@ async function translateAzure(text, config, signal, timeout) {
     throw error;
   }
 }
+async function signAliyunRequest(body, config) {
+  const encoder = new TextEncoder();
+  const hex = bytes => Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
+  const hash = async value => hex(await crypto.subtle.digest('SHA-256', encoder.encode(value)));
+  const payloadHash = await hash(body);
+  const headers = {
+    'content-type': 'application/x-www-form-urlencoded',
+    'x-acs-action': 'TranslateGeneral',
+    'x-acs-content-sha256': payloadHash,
+    'x-acs-date': new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    'x-acs-signature-nonce': crypto.randomUUID(),
+    'x-acs-version': '2018-10-12'
+  };
+  // Fetch sets Host from the URL. Include that value in the signature.
+  const signed = {...headers, host: new URL(C.aliyunEndpoint).host};
+  const names = Object.keys(signed).sort();
+  const canonicalHeaders = names.map(name => `${name}:${signed[name]}\n`).join('');
+  const signedHeaders = names.join(';');
+  const canonicalRequest = ['POST', '/', '', canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const algorithm = 'ACS3-HMAC-SHA256';
+  const stringToSign = `${algorithm}\n${await hash(canonicalRequest)}`;
+  const key = await crypto.subtle.importKey('raw', encoder.encode(config.aliyunAccessKeySecret),
+    {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
+  const signature = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(stringToSign)));
+  headers.authorization = `${algorithm} Credential=${config.aliyunAccessKeyId},SignedHeaders=${signedHeaders},Signature=${signature}`;
+  return headers;
+}
+async function translateAliyun(text, language, config, signal) {
+  if (!C.hasAliyunCredentials(config)) throw new Error('请在扩展设置中填写有效的阿里云 AccessKey ID 和 Secret');
+  if (!await chrome.permissions.contains({origins: [C.permissionOrigin(C.aliyunEndpoint)]})) {
+    throw new Error('请在扩展设置中保存并授权阿里云机器翻译');
+  }
+  const primary = language.toLowerCase().split('-')[0];
+  const known = ['en', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'it', 'ru', 'ar', 'vi', 'th', 'id'];
+  const body = new URLSearchParams({
+    FormatType: 'text', SourceLanguage: known.includes(primary) ? primary : 'auto',
+    TargetLanguage: 'zh', SourceText: text, Scene: 'general'
+  }).toString().replace(/\+/g, '%20').replace(/\*/g, '%2A');
+  const headers = await signAliyunRequest(body, config);
+  let data;
+  try {
+    data = JSON.parse(await fetchLimited(C.aliyunEndpoint, {method: 'POST', headers, credentials: 'omit', body}, signal));
+  } catch (error) {
+    if ([400,401,403].includes(error.status)) {
+      error.message = `阿里云拒绝请求（HTTP ${error.status}），请检查 AccessKey、机器翻译权限及系统时间`;
+      error.retryAfter ||= 60;
+    }
+    if (error.status === 429) error.message = '阿里云机器翻译限流，稍后自动重试';
+    throw error;
+  }
+  const code = Number(data?.Code);
+  if (code !== 200) {
+    const hint = {
+      10005: '不支持当前语种组合', 10006: '无法识别源语言', 10008: '文字超过接口长度限制',
+      10009: 'AccessKey 没有翻译权限', 10010: '账号尚未开通机器翻译', 10013: '账号未开通服务或欠费'
+    }[code] || '翻译失败';
+    const error = new Error(`阿里云机器翻译${hint}${Number.isFinite(code) ? `（${code}）` : ''}`);
+    if ([10009,10010,10013].includes(code)) error.retryAfter = 60;
+    throw error;
+  }
+  const result = data.Data?.Translated;
+  if (typeof result !== 'string' || !result.trim() || result.length > 12000) {
+    throw new Error('阿里云机器翻译未返回有效译文');
+  }
+  return result.trim();
+}
 async function translate(text, language, config, signal, {automatic=false, source=text, before="", after=""}={}) {
   if (C.isChinese(language)) return text;
   if (config.provider === 'youtube') throw new Error('当前视频没有可读的 YouTube 中文译轨');
   if (config.provider === 'azure') return translateAzure(text, config, signal);
+  if (config.provider === 'aliyun') return translateAliyun(text, language, config, signal);
   if (config.provider === 'custom') {
     const u = new URL(config.endpoint);
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname))) throw new Error('翻译地址需要 HTTPS 或本机地址');
@@ -170,7 +237,8 @@ async function handle(m, sender) {
     if (m.type === 'SAVE_PLAYER_SETTINGS' && Object.keys(m.settings || {}).some(k => !allowed.includes(k))) throw new Error('接口与密钥请在扩展设置页修改');
     const task = settingsWrites.then(async () => {
       const previous = await settings(), s = C.sanitizeSettings({...previous, ...m.settings});
-      if (['provider', 'endpoint', 'apiKey', 'model', 'azureKey', 'azureRegion', 'azureFallback'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
+      if (['provider', 'endpoint', 'apiKey', 'model', 'azureKey', 'azureRegion', 'azureFallback',
+        'aliyunAccessKeyId', 'aliyunAccessKeySecret'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
       await chrome.storage.local.set({settings: s});
       const tabs = await chrome.tabs.query({url: 'https://www.youtube.com/*'});
       for (const tab of tabs) chrome.tabs.sendMessage(tab.id, {type: 'SETTINGS_CHANGED', settings: C.publicSettings(s)}).catch(() => {});
