@@ -21,8 +21,14 @@
     </section>
     <section class="card caption-settings"><h2>字幕设置</h2><p class="muted small">播放器小图标中的“字幕设置”可以即时调整并自动保存。本页预览修改后，点击底部“保存设置”生效。</p><div id="captionSettings"></div></section>
     <section class="card"><h2>翻译服务</h2>
-      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
-      <p class="muted small">默认接口与参考插件使用的翻译源一致。它不是有可用性承诺的正式 API；断网、限流时会退避重试。已有中文字幕可直接朗读。</p>
+      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0 免费档</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
+      <p class="muted small">选择 YouTube 时，只读取视频的中文字幕或 YouTube 提供的中文译轨。Google 被限流时，扩展会等待服务恢复。启用 YouTube 优先且还没有译文时，也会自动尝试 YouTube 中文译轨。</p>
+      <div id="azureFields" class="hidden">
+        <label for="azureKey">微软翻译密钥</label><input id="azureKey" type="password" autocomplete="off">
+        <label for="azureRegion">Azure 资源区域</label><input id="azureRegion" type="text" placeholder="例如 eastasia，Global 可留空" autocomplete="off">
+        <label class="check"><input id="azureFallback" type="checkbox"><span>Google 请求失败时，允许使用我的微软翻译额度</span></label>
+        <p class="muted small">需要在 Azure 创建 Translator 资源并选择 F0 免费档。使用微软翻译时，待译字幕发往微软。密钥只保存在本机扩展存储。<a href="https://learn.microsoft.com/azure/ai-services/translator/quickstart-translator" target="_blank" rel="noopener noreferrer">微软配置指南</a></p>
+      </div>
       <div id="customFields" class="hidden">
         <label for="endpoint">完整 Chat Completions 地址</label><input id="endpoint" type="url" placeholder="https://你的服务域名/v1/chat/completions" autocomplete="off">
         <label for="model">模型名称</label><input id="model" type="text" placeholder="填写服务提供的模型名称" autocomplete="off">

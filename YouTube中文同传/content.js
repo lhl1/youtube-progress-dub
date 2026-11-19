@@ -4,6 +4,7 @@
   let settings = {...C.defaults}, currentId = '', active = false, video = null, videoListeners = null;
   let tracks = [], trackKey = '', sourceLang = 'auto', sourceName = '', sourceAutomatic = false, isLive = false;
   let loading = false, loadSerial = 0, retryAt = 0, captionFailures = 0, lastCaptionRefresh = 0;
+  let triedYouTubeFallback = false;
   let lastCaptureUrl = '', lastCapturedBody = null, fallbackText = '';
   let cacheRows = {}, dirtyCache = {}, cacheTimer = null, cacheOwner = '';
   let errorText = '', errorUntil = 0, lastSpoken = '', mediaWaiting = false, speechRetryAt = 0;
@@ -24,7 +25,13 @@
       if (!cacheTimer) cacheTimer = setTimeout(flushCache, 2000);
       tick();
     },
-    onError: error => report(error.message),
+    onError: error => {
+      report(error.message);
+      if (!error.youtubeFallback || triedYouTubeFallback || loading || isLive ||
+          !settings.autoTranslate || settings.provider !== 'google-free' || scheduler.cache.size) return;
+      triedYouTubeFallback = true;
+      loadCaptions(true, {fallback: true}).catch(e => report(e.message));
+    },
     onReset: () => { speech.stop(); restoreVolume(); lastSpoken = ''; narrationAnchor=video?.currentTime||0; narration.reset(narrationAnchor); }
   });
   const speech = new DubSpeech({
@@ -37,7 +44,12 @@
       const timer = setTimeout(() => reject(new Error('扩展请求超时，正在恢复')), timeout);
       chrome.runtime.sendMessage(message).then(r => {
         clearTimeout(timer);
-        if (!r?.ok) { const e = new Error(r?.error || '扩展服务未响应'); e.retryAfter = r?.retryAfter; reject(e); }
+        if (!r?.ok) {
+          const error = new Error(r?.error || '扩展服务未响应');
+          error.retryAfter = r?.retryAfter;
+          error.youtubeFallback = r?.youtubeFallback;
+          reject(error);
+        }
         else resolve(r.data);
       }, e => { clearTimeout(timer); reject(new Error(e.message?.includes('context invalidated') ? '插件已更新，请刷新 YouTube 页面' : e.message)); });
     });
@@ -116,13 +128,17 @@
     try {
       const u = new URL(url); if (u.searchParams.get('v') !== currentId || u.origin !== location.origin || u.pathname !== '/api/timedtext') return;
       lastCaptureUrl = url; lastCapturedBody = {url, body};
-      if (scheduler.cues.length && !isLive) return;
       const lang = u.searchParams.get('tlang') || u.searchParams.get('lang') || 'auto';
+      if (settings.provider === 'youtube') {
+        if (!loading && (!scheduler.cues.length || isLive)) loadCaptions(true).catch(e => report(e.message));
+        return;
+      }
+      if (scheduler.cues.length && !isLive) return;
       const rows = C.parseCaptions(body, DOMParser);
       if (rows.length) installRows(rows, lang, C.isChinese(lang), `已捕获 ${lang} 字幕${isLive ? '（直播）' : ''}`, {liveAppend: isLive && sourceLang === lang, automatic: capturedAutomatic(url)});
     } catch (e) { report(e.message); }
   }
-  async function loadCaptions(force = false) {
+  async function loadCaptions(force = false, {fallback = false} = {}) {
     if (!active || loading || (!force && Date.now() < retryAt)) return;
     if (!tracks.length && !lastCaptureUrl) { sendPage('INSPECT'); retryAt = Date.now() + 4000; return; }
     loading = true;
@@ -132,38 +148,59 @@
     try {
       const selected = C.chooseTrack(tracks, trackKey);
       const base = selected?.baseUrl || lastCaptureUrl;
-      const lang = selected?.languageCode || new URL(base).searchParams.get('lang') || 'auto';
       if (!base) throw new Error('暂未取得字幕地址');
+      const original = new URL(base);
+      const lang = original.searchParams.get('tlang') || selected?.languageCode || original.searchParams.get('lang') || 'auto';
       const candidates = [];
-      // Translating raw ASR rows first loses English syntax before we can infer
-      // sentence boundaries. Group the English ASR source before translation.
+      const youtubeOnly = fallback || settings.provider === 'youtube';
+      const captured = lastCaptureUrl && new URL(lastCaptureUrl);
+      const capturedLang = captured && (captured.searchParams.get('tlang') || captured.searchParams.get('lang') || 'auto');
+      const matchesSelected = !selected || C.sameCaptionSource(original, captured, tracks);
       const automatic = C.isAutomaticTrack(selected, base);
       const englishAsr = /^en(?:-|$)/i.test(lang) && automatic;
-      if (settings.autoTranslate && !englishAsr && !C.isChinese(lang) && selected?.isTranslatable && settings.provider !== 'custom') {
-        const u = new URL(base); u.searchParams.set('tlang', 'zh-Hans');
-        candidates.push({url: u.href, lang: 'zh-Hans', translated: true, automatic, name: 'YouTube 自动翻译中文'});
+      const preferYouTube = youtubeOnly || (settings.autoTranslate && !englishAsr && settings.provider === 'google-free');
+      if (preferYouTube && !C.isChinese(lang)) {
+        if (matchesSelected && C.isChinese(capturedLang)) {
+          candidates.push({url: captured.href, lang: capturedLang, translated: true, automatic: capturedAutomatic(captured.href), name: 'YouTube 自动翻译中文'});
+        }
+        if (selected?.isTranslatable || !selected) {
+          // Prefer a fresh URL observed from the same player track.
+          for (const source of [matchesSelected && captured?.href, base].filter(Boolean)) {
+            const url = new URL(source);
+            url.searchParams.set('tlang', 'zh-Hans');
+            if (!candidates.some(candidate => candidate.url === url.href)) {
+              candidates.push({url: url.href, lang: 'zh-Hans', translated: true, automatic, name: 'YouTube 自动翻译中文'});
+            }
+          }
+        }
       }
-      candidates.push({url: base, lang, translated: C.isChinese(lang), automatic, name: selected?.name || lang});
+      if (!youtubeOnly || C.isChinese(lang)) {
+        candidates.push({url: base, lang, translated: C.isChinese(lang), automatic, name: selected?.name ||
+          (original.searchParams.has('tlang') && C.isChinese(lang) ? 'YouTube 自动翻译中文' : lang)});
+      }
       // YouTube can renew signed caption URLs during long sessions. A recently
       // observed request is a useful fallback when the player's old URL expires.
-      if (lastCaptureUrl && lastCaptureUrl !== base) {
-        const captured = new URL(lastCaptureUrl), captureLang = captured.searchParams.get('tlang') || captured.searchParams.get('lang') || 'auto';
-        if (!trackKey || captureLang === lang || C.isChinese(captureLang)) candidates.push({url: lastCaptureUrl, lang: captureLang, translated: C.isChinese(captureLang), automatic: capturedAutomatic(lastCaptureUrl), name: `已更新 ${captureLang} 字幕`});
+      if (matchesSelected && captured && captured.href !== base && (!youtubeOnly || C.isChinese(capturedLang)) &&
+          !candidates.some(candidate => candidate.url === captured.href)) {
+        candidates.push({url: captured.href, lang: capturedLang, translated: C.isChinese(capturedLang),
+          automatic: capturedAutomatic(captured.href), name: `已更新 ${capturedLang} 字幕`});
       }
       let lastError;
       for (const candidate of candidates) {
         if (!valid()) return;
         try {
-          let rows = await fetchCaption(candidate.url);
+          const rows = candidate.url === lastCapturedBody?.url
+            ? C.parseCaptions(lastCapturedBody.body, DOMParser) : await fetchCaption(candidate.url);
           if (!rows.length) throw new Error('字幕返回为空');
-          if (!valid()) return;
+          if (!valid() || fallback && scheduler.cache.size) return;
           installRows(rows, candidate.lang, candidate.translated, candidate.name, {liveAppend: isLive && sourceLang === candidate.lang, automatic: candidate.automatic});
           return;
         } catch (e) { lastError = e; }
       }
+      if (youtubeOnly) throw new Error('未取得 YouTube 中文译轨，可在 YouTube 字幕菜单选自动翻译 → 中文，或选择其他翻译服务');
       throw lastError || new Error('字幕加载失败');
     } catch (e) {
-      if (!valid()) return;
+      if (!valid() || fallback) return;
       captionFailures++;
       sendPage('INSPECT');
       retryAt = Date.now() + Math.min(60000, 3000 * 2 ** Math.min(captionFailures, 4));
@@ -227,7 +264,7 @@
     if (!active || !video) { render(); return; }
     const position = video.currentTime, wall = Date.now();
     if (document.querySelector('#movie_player')?.classList.contains('ad-showing')) { if (settings.syncMode === 'complete') speech.pause(); else speech.stop(); restoreVolume(); render('广告期间暂停同传'); return; }
-    if ((!scheduler.cues.length && !sourceName) || sourceName.startsWith('当前屏幕')) scanScreenCaption(position);
+    if (settings.provider !== 'youtube' && ((!scheduler.cues.length && !sourceName) || sourceName.startsWith('当前屏幕'))) scanScreenCaption(position);
     const complete = settings.syncMode === 'complete';
     if (complete) narration.update(scheduler.cues, position);
     scheduler.tick(position, video.playbackRate, wall, complete ? narration.head?.start : null);
@@ -275,7 +312,7 @@
   async function start({automatic=false}={}) {
     if (!currentId || !video) { report('请先打开一个 YouTube 视频'); return; }
     if (active) return;
-    pendingStartId = ''; voiceNeedsGesture = false;
+    pendingStartId = ''; voiceNeedsGesture = false; triedYouTubeFallback = false;
     autoSession=automatic;
     active = true; sessionToken++; errorText = ''; lastSpoken = ''; scheduler.enabled = true;
     narrationAnchor=video.currentTime;narration.reset(narrationAnchor); speechRetryAt = 0;
@@ -351,7 +388,8 @@
   async function applySettings(next) {
     const old = settings; settings = C.sanitizeSettings(next); scheduler.settings = settings;
     if (active) duckVolume();
-    if (active && (old.cacheRevision !== settings.cacheRevision || old.autoTranslate !== settings.autoTranslate)) {
+    if (active && (old.provider !== settings.provider || old.cacheRevision !== settings.cacheRevision || old.autoTranslate !== settings.autoTranslate)) {
+      loadSerial++; loading = false; triedYouTubeFallback = false; sourceName = '';
       scheduler.setCues([], sourceLang); scheduler.enabled = true; loadCaptions(true).catch(e => report(e.message));
     }
     if (old.syncMode !== settings.syncMode || old.voice !== settings.voice) {
@@ -418,11 +456,11 @@
         if (!active) start(); else { if (!scheduler.cues.length || sourceName.startsWith('当前屏幕')) loadCaptions(true).catch(e => report(e.message)); tick(); }
       },
       onTrack: key => {
-        trackKey = key; lastSpoken = ''; loadSerial++; loading = false;
+        trackKey = key; lastSpoken = ''; loadSerial++; loading = false; triedYouTubeFallback = false;
         scheduler.setCues([], sourceLang); scheduler.enabled = active;
         if (active) loadCaptions(true).catch(e => report(e.message));
       },
-      onChange: next => applySettings(next),
+      onChange: next => applySettings({...next, provider: settings.provider}),
       onSave: async next => {
         const keys = C.playerSettingKeys;
         await rpc({type: 'SAVE_PLAYER_SETTINGS', settings: Object.fromEntries(keys.map(k => [k, next[k]]))});

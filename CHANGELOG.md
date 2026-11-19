@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.6 — 2026-11-19
+
+- Add a keyless YouTube-only translation option for available Chinese caption tracks, including translated ASR tracks.
+- Respect Google rate limits across video tabs. Try YouTube when no translation is ready and the YouTube preference is enabled.
+- Add Azure Translator with a separate key and resource region, plus an opt-in Azure fallback for Google failures.
+
 ## 1.7.5 — 2026-11-16
 
 - Keep an explicitly selected or already-started voice across pause/resume, later cues, cooldowns and voice-list refreshes; wait for the original voice if it disappears. A changed user preference can select a new voice.

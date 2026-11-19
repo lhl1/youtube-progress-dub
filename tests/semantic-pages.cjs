@@ -20,7 +20,7 @@ const fixture=`<!doctype html><html><head><meta charset="utf-8"><style>body{marg
     });
     const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
     await worker.evaluate(async sample=>{
-      await chrome.storage.local.set({settings:{...DubCore.defaults,autoStart:false,syncMode:'complete',bilingual:true,autoTranslate:true}});
+      await chrome.storage.local.set({settings:{...DubCore.defaults,voice:'',autoStart:false,syncMode:'complete',bilingual:true,autoTranslate:true}});
       const native=fetch;globalThis.__nativeFetch=native;globalThis.__asrRequests=[];
       globalThis.fetch=async(u,o)=>{
         if(String(u).startsWith('https://translate.googleapis.com/')){

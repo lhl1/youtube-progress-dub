@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let saved = {...DubCore.defaults};
-const fields = [...DubCore.playerSettingKeys,'endpoint','model','apiKey'];
+const fields = [...DubCore.playerSettingKeys, 'endpoint', 'model', 'apiKey', 'azureKey', 'azureRegion', 'azureFallback'];
 const captionStyle=document.createElement('style');captionStyle.textContent=DubSubtitles.css;document.head.appendChild(captionStyle);
 $('captionSettings').innerHTML=DubSubtitles.controlsMarkup();
 const engine = new DubSpeech({onError: e => { $('voiceMessage').textContent = e.message; }});
@@ -11,6 +11,7 @@ function labels() {
   for (const key of ['volume', 'originalVolume']) $(key + 'Value').textContent = `${Math.round(Number($(key).value) * 100)}%`;
   $('lookaheadValue').textContent = `${$('lookahead').value} 秒`;
   $('customFields').classList.toggle('hidden', $('provider').value !== 'custom');
+  $('azureFields').classList.toggle('hidden', !['azure', 'google-free'].includes($('provider').value));
   const captionSettings={...saved};
   for(const key of DubCore.subtitleSettingKeys){const e=$(key);captionSettings[key]=e.type==='checkbox'?e.checked:e.type==='range'?Number(e.value):e.value;}
   DubSubtitles.refreshControls($('captionSettings'),captionSettings);
@@ -40,6 +41,11 @@ $('form').addEventListener('submit', async event => {
   const next = {...saved};
   for (const key of fields) { const e = $(key); next[key] = e.type === 'checkbox' ? e.checked : e.type === 'range' ? Number(e.value) : e.value.trim(); }
   try {
+    if (next.provider === 'azure' || (next.provider === 'google-free' && next.azureFallback)) {
+      if (!next.azureKey) throw new Error('请填写 Azure Translator 密钥');
+      if (next.azureRegion && !/^[a-z0-9-]{1,64}$/i.test(next.azureRegion)) throw new Error('请填写 Azure 资源的区域代码，例如 eastasia');
+      if (!await chrome.permissions.request({origins: [DubCore.azureOrigin]})) throw new Error('未授权微软翻译，设置未保存');
+    }
     if (next.provider === 'custom') {
       const u = new URL(next.endpoint);
       if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname))) throw new Error('请填写 HTTPS 地址或本机 HTTP 地址');

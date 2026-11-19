@@ -495,6 +495,13 @@
       return identified.length>0&&identified.every(t=>isAutomaticTrack(t,t.baseUrl));
     } catch{return false;}
   }
+  function sameCaptionSource(original, captured, tracks) {
+    if (!captured) return false;
+    const identity = url => ['lang', 'kind', 'name', 'vssId'].map(key => url.searchParams.get(key));
+    const source = identity(original);
+    if (identity(captured).some((value, index) => value !== source[index])) return false;
+    return tracks.filter(track => identity(new URL(track.baseUrl)).every((value, index) => value === source[index])).length === 1;
+  }
   function prepareCues(rows, {automatic = false, live = false, language = ''} = {}) {
     if (automatic) {
       const cues=groupCues(rows,{live,language}).map(c=>({...c,automatic:true}));
@@ -607,6 +614,7 @@
   const subtitleAppearanceDefaults = Object.fromEntries(Object.entries(subtitleFields).filter(([,f])=>f.group!=='timing').map(([k,f])=>[k,f.value]));
   const subtitleSettingKeys = ['subtitle','bilingual',...Object.keys(subtitleFields)];
   const playerSettingKeys = ['voice','rate','volume','originalVolume','lookahead','autoTranslate','autoStart','syncMode','provider',...subtitleSettingKeys];
+  const azureOrigin = 'https://api.cognitive.microsofttranslator.com/*';
   const subtitlePresets = {
     classic: {label:'经典',patch:{...subtitleAppearanceDefaults}},
     cinema: {label:'影院',patch:{...subtitleAppearanceDefaults,subtitleColor:'#ffe66d',subtitleBackgroundOpacity:0,subtitleEdge:'outline',subtitleBold:true}},
@@ -616,7 +624,8 @@
   const defaults = {
     voice: 'Microsoft Xiaoxiao (Natural) - Chinese (Simplified, China)', rate: 1.3, volume: 1, originalVolume: 0.25, lookahead: 100,
     subtitle: true, bilingual: true, autoTranslate: true, autoStart: true,
-    syncMode: 'complete', provider: 'google-free', endpoint: '', apiKey: '', model: '', cacheRevision: 0, ...subtitleDefaults
+    syncMode: 'complete', provider: 'google-free', endpoint: '', apiKey: '', model: '',
+    azureKey: '', azureRegion: '', azureFallback: false, cacheRevision: 0, ...subtitleDefaults
   };
   function sanitizeSettings(input) {
     const s = {...defaults, ...input};
@@ -625,8 +634,10 @@
     }
     for (const key of ['subtitle', 'bilingual', 'autoTranslate', 'autoStart']) s[key] = !!s[key];
     s.syncMode = s.syncMode === 'complete' ? 'complete' : 'follow';
-    s.provider = s.provider === 'custom' ? 'custom' : 'google-free';
-    for (const key of ['voice', 'endpoint', 'apiKey', 'model']) s[key] = String(s[key] || '').slice(0, 2048);
+    s.provider = ['google-free', 'youtube', 'azure', 'custom'].includes(s.provider) ? s.provider : defaults.provider;
+    for (const key of ['voice', 'endpoint', 'apiKey', 'model', 'azureKey']) s[key] = String(s[key] || '').slice(0, 2048);
+    s.azureRegion = String(s.azureRegion || '').trim().toLowerCase().slice(0, 64);
+    s.azureFallback = s.azureFallback === true;
     s.cacheRevision = Number(s.cacheRevision) || 0;
     for (const [key,field] of Object.entries(subtitleFields)) {
       if (field.type === 'range') s[key] = clamp(Number.isFinite(Number(s[key])) ? Number(s[key]) : field.value, field.min, field.max);
@@ -642,7 +653,10 @@
     const cue = cues[lowerBound(cues, at - .05)];
     return cue && cue.start <= at + .12 && cue.end > at - .05 ? cue : null;
   }
-  function publicSettings(s) { const {apiKey, ...rest} = sanitizeSettings(s); return rest; }
+  function publicSettings(s) {
+    const {apiKey, azureKey, azureRegion, azureFallback, ...rest} = sanitizeSettings(s);
+    return {...rest, azureConfigured: !!azureKey.trim()};
+  }
   function cacheKey(cue, lang, settings) {
     const context=cue.automatic && settings.provider==='custom'?`${cue.contextBefore||''}|${cue.contextAfter||''}`:'';
     return `${cue.automatic===false?'sentence-v5:native':'meaning-v6:asr'}:${settings.provider}:${settings.cacheRevision}:${lang}:${hash(context?cue.text+'|'+context:cue.text)}`;
@@ -758,7 +772,7 @@
       return Math.max(0, last - position);
     }
   }
-  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
+  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, sameCaptionSource, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, azureOrigin, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
   root.DubCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

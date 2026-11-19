@@ -11,7 +11,7 @@ function harness(existing = {}, fetchImpl = async () => new Response('[[["你好
     async set(values) { Object.assign(data, values); }, async remove(keys) { for (const k of Array.isArray(keys) ? keys : [keys]) delete data[k]; }, async setAccessLevel() {}
   }; }
   const chrome = {
-    storage: {local: storage(local), session: storage(session)}, permissions: {contains: async () => true},
+    storage: {local: storage(local), session: storage(session)}, permissions: {contains: existing.contains || (async () => true)},
     runtime: {getURL: p => 'chrome-extension://test/' + p, openOptionsPage: async () => {}, onMessage: {addListener(fn) { listeners.message = fn; }}},
     tabs: {query: async () => [], sendMessage: async (id, msg) => { sent.push({id, msg}); }, onRemoved: {addListener(fn) { listeners.removed = fn; }}},
     webRequest: {onCompleted: {addListener(fn) { listeners.web = fn; }}}
@@ -75,6 +75,62 @@ test('custom sentence translation has enough output budget and rejects token-lim
 test('429 returns retry-after to the progress scheduler', async () => {
   const h = harness({}, async () => new Response('', {status: 429, headers: {'retry-after': '50'}}));
   const r = await h.rpc({type: 'TRANSLATE', requestId: '1', text: 'hello'}); assert.equal(r.ok, false); assert.equal(r.retryAfter, 50);
+});
+
+test('Google 429 backs off across video tabs and enables a YouTube retry without requesting Azure by default', async () => {
+  let calls = 0;
+  const retryDate = new Date(Date.now() + 90000).toUTCString();
+  const h = harness({}, async () => {
+    calls++;
+    return new Response('', {status: 429, headers: {'retry-after': retryDate}});
+  });
+  const request = {type: 'TRANSLATE', requestId: 'rate-limit', text: 'A sentence.', language: 'en'};
+  const first = await h.rpc(request);
+  const second = await h.rpc(request, {...h.yt, tab: {id: 9}});
+  assert.equal(first.ok, false);
+  assert.ok(first.retryAfter >= 88 && first.retryAfter <= 90);
+  assert.equal(first.youtubeFallback, true);
+  assert.equal(second.youtubeFallback, true);
+  assert.equal(calls, 1);
+});
+
+test('Azure fallback requires opt-in and uses the configured Azure key only on the official host', async () => {
+  const requests = [];
+  const h = harness({local: {settings: {azureKey: 'test-azure-key', azureRegion: 'eastasia'}}}, async (url, options) => {
+    requests.push({url: new URL(url), options});
+    if (requests.length === 1) return new Response('', {status: 429});
+    return Response.json([{translations: [{to: 'zh-Hans', text: '译文。'}]}]);
+  });
+  const request = {type: 'TRANSLATE', requestId: 'azure', text: 'A sentence.', language: 'en'};
+  assert.equal((await h.rpc(request)).ok, false);
+  assert.equal(requests.length, 1);
+  await h.rpc({type: 'SAVE_SETTINGS', settings: {azureFallback: true}}, h.popup);
+  const result = await h.rpc(request);
+  assert.equal(result.data.text, '译文。');
+  assert.equal(result.data.via, 'azure');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].options.headers, undefined);
+  const {url, options} = requests[1];
+  assert.equal(url.origin, 'https://api.cognitive.microsofttranslator.com');
+  assert.equal(url.searchParams.get('to'), 'zh-Hans');
+  assert.equal(url.searchParams.get('api-version'), '3.0');
+  assert.equal(options.headers['Ocp-Apim-Subscription-Key'], 'test-azure-key');
+  assert.equal(options.headers['Ocp-Apim-Subscription-Region'], 'eastasia');
+  assert.equal(options.credentials, 'omit');
+  assert.deepEqual(JSON.parse(options.body), [{Text: 'A sentence.'}]);
+  const pageSettings = (await h.rpc({type: 'GET_SETTINGS'})).data;
+  assert.equal(pageSettings.azureConfigured, true);
+  assert.equal('azureKey' in pageSettings, false);
+  assert.equal((await h.rpc({type: 'SAVE_PLAYER_SETTINGS', settings: {azureFallback: false}})).ok, false);
+});
+
+test('explicit YouTube and unapproved Azure modes never send a caption to Google', async () => {
+  const h = harness({local: {settings: {provider: 'youtube', azureKey: 'test-key'}}, contains: async () => false},
+    () => assert.fail('Unexpected network request'));
+  const request = {type: 'TRANSLATE', requestId: 'blocked-provider', text: 'Caption', language: 'en'};
+  assert.match((await h.rpc(request)).error, /YouTube 中文译轨/);
+  await h.rpc({type: 'SAVE_SETTINGS', settings: {provider: 'azure'}}, h.popup);
+  assert.match((await h.rpc(request)).error, /授权微软翻译/);
 });
 
 test('long complete requests and translations survive the worker and persisted cache without silent slicing',async()=>{

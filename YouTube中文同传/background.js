@@ -2,6 +2,7 @@ importScripts('core.js');
 'use strict';
 const C = DubCore;
 const controllers = new Map();
+let googleRetryAt = 0;
 let cacheWrites = Promise.resolve();
 let audioClaims = Promise.resolve();
 let settingsWrites = Promise.resolve();
@@ -26,7 +27,12 @@ async function fetchLimited(url, options, signal, ms = 12000) {
     const r = await fetch(url, {...options, signal: controller.signal, redirect: 'error'});
     if (!r.ok) {
       const e = new Error(r.status === 429 ? '翻译服务限流，稍后自动重试' : `服务 HTTP ${r.status}`);
-      e.retryAfter = Math.min(120, Number(r.headers.get('retry-after')) || (r.status === 429 ? 30 : [401,403].includes(r.status) ? 60 : 0)); throw e;
+      e.status = r.status;
+      const retry = r.headers.get('retry-after');
+      const delay = retry && /^\d+$/.test(retry) ? Number(retry) : (Date.parse(retry) - Date.now()) / 1000;
+      e.retryAfter = Math.min(3600, Math.max(1, Math.ceil(delay || (r.status === 429 ? 30 : 60))));
+      if (!retry && ![429,401,403].includes(r.status)) e.retryAfter = 0;
+      throw e;
     }
     // Include body consumption in the deadline, not only the response headers.
     return await r.text();
@@ -35,8 +41,28 @@ async function fetchLimited(url, options, signal, ms = 12000) {
     throw e;
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
+async function translateAzure(text, config, signal, timeout) {
+  if (!config.azureKey.trim()) throw new Error('请先在扩展设置中填写微软翻译密钥');
+  if (!await chrome.permissions.contains({origins: [C.azureOrigin]})) throw new Error('请在扩展设置中保存并授权微软翻译');
+  const headers = {'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': config.azureKey.trim()};
+  if (config.azureRegion && config.azureRegion !== 'global') headers['Ocp-Apim-Subscription-Region'] = config.azureRegion;
+  try {
+    const endpoint = 'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hans';
+    const data = JSON.parse(await fetchLimited(endpoint, {method: 'POST', headers, credentials: 'omit',
+      body: JSON.stringify([{Text: text}])}, signal, timeout));
+    const result = data?.[0]?.translations?.find?.(item => item?.to === 'zh-Hans')?.text;
+    if (typeof result !== 'string' || !result.trim() || result.length > 12000) throw new Error('微软翻译未返回有效的简体中文译文');
+    return {text: result.trim(), via: 'azure'};
+  } catch (error) {
+    if ([401,403].includes(error.status)) error.message = '微软翻译未授权或额度已用完，请检查密钥、区域和 Azure 配额';
+    if (error.status === 429) error.message = '微软翻译已达到请求限额，稍后自动重试';
+    throw error;
+  }
+}
 async function translate(text, language, config, signal, {automatic=false, source=text, before="", after=""}={}) {
   if (C.isChinese(language)) return text;
+  if (config.provider === 'youtube') throw new Error('当前视频没有可读的 YouTube 中文译轨');
+  if (config.provider === 'azure') return translateAzure(text, config, signal);
   if (config.provider === 'custom') {
     const u = new URL(config.endpoint);
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname))) throw new Error('翻译地址需要 HTTPS 或本机地址');
@@ -56,12 +82,35 @@ async function translate(text, language, config, signal, {automatic=false, sourc
     return result.trim();
   }
   const q = new URLSearchParams({client: 'gtx', sl: language || 'auto', tl: 'zh-CN', dt: 't', q: text});
-  const body = await fetchLimited(`https://translate.googleapis.com/translate_a/single?${q}`, {credentials: 'omit'}, signal);
-  const data = JSON.parse(body);
-  if (!Array.isArray(data?.[0])) throw new Error('翻译服务响应格式变化');
-  const result = data[0].filter(x => Array.isArray(x) && typeof x[0] === 'string').map(x => x[0]).join('');
-  if (!result.trim()) throw new Error('翻译结果为空');
-  if(result.length>12000)throw new Error('译文超过安全长度，无法确认完整；请检查翻译服务输出');
+  let data, result;
+  try {
+    if (Date.now() < googleRetryAt) {
+      const error = new Error('Google 翻译限流，稍后自动重试');
+      error.status = 429;
+      error.coolingDown = true;
+      error.retryAfter = Math.ceil((googleRetryAt - Date.now()) / 1000);
+      throw error;
+    }
+    const body = await fetchLimited(`https://translate.googleapis.com/translate_a/single?${q}`, {credentials: 'omit'}, signal,
+      config.azureFallback && config.azureKey.trim() ? 6500 : 12000);
+    data = JSON.parse(body);
+    if (!Array.isArray(data?.[0])) throw new Error('Google 翻译响应格式变化');
+    result = data[0].filter(x => Array.isArray(x) && typeof x[0] === 'string').map(x => x[0]).join('');
+    if (!result.trim() || result.length > 12000) throw new Error('Google 翻译未返回有效译文');
+  } catch (error) {
+    if (signal.aborted) throw error;
+    if (error.status === 429 && !error.coolingDown) googleRetryAt = Math.max(googleRetryAt, Date.now() + error.retryAfter * 1000);
+    error.youtubeFallback = true;
+    if (config.azureFallback && config.azureKey.trim()) {
+      try { return await translateAzure(text, config, signal, 8000); }
+      catch (backup) {
+        if (signal.aborted) throw backup;
+        error.message += `，微软备用暂不可用（${backup.message}）`;
+        error.retryAfter = Math.max(error.retryAfter || 0, backup.retryAfter || 0);
+      }
+    }
+    throw error;
+  }
   if(!automatic)return result;
   // GTX exposes coarse source/target sentence pairs, not word alignment.
   // Retain only pairs whose source span is actually found in this request.
@@ -121,7 +170,7 @@ async function handle(m, sender) {
     if (m.type === 'SAVE_PLAYER_SETTINGS' && Object.keys(m.settings || {}).some(k => !allowed.includes(k))) throw new Error('接口与密钥请在扩展设置页修改');
     const task = settingsWrites.then(async () => {
       const previous = await settings(), s = C.sanitizeSettings({...previous, ...m.settings});
-      if (['provider', 'endpoint', 'apiKey', 'model'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
+      if (['provider', 'endpoint', 'apiKey', 'model', 'azureKey', 'azureRegion', 'azureFallback'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
       await chrome.storage.local.set({settings: s});
       const tabs = await chrome.tabs.query({url: 'https://www.youtube.com/*'});
       for (const tab of tabs) chrome.tabs.sendMessage(tab.id, {type: 'SETTINGS_CHANGED', settings: C.publicSettings(s)}).catch(() => {});
@@ -188,7 +237,7 @@ async function handle(m, sender) {
   throw new Error('未知消息');
 }
 chrome.runtime.onMessage.addListener((m, sender, respond) => {
-  handle(m || {}, sender).then(data => respond({ok: true, data}), error => respond({ok: false, error: error.message, retryAfter: error.retryAfter || 0}));
+  handle(m || {}, sender).then(data => respond({ok: true, data}), error => respond({ok: false, error: error.message, retryAfter: error.retryAfter || 0, youtubeFallback: error.youtubeFallback === true}));
   return true;
 });
 chrome.webRequest.onCompleted.addListener(async details => {
