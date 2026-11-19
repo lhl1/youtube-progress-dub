@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 let saved = {...DubCore.defaults};
 const fields = [...DubCore.playerSettingKeys, 'endpoint', 'model', 'apiKey', 'azureKey', 'azureRegion', 'azureFallback',
-  'aliyunAccessKeyId', 'aliyunAccessKeySecret', 'baiduAppId', 'baiduSecret'];
+  'aliyunAccessKeyId', 'aliyunAccessKeySecret', 'baiduAppId', 'baiduSecret', 'deeplKey'];
 const captionStyle=document.createElement('style');captionStyle.textContent=DubSubtitles.css;document.head.appendChild(captionStyle);
 $('captionSettings').innerHTML=DubSubtitles.controlsMarkup();
 const engine = new DubSpeech({onError: e => { $('voiceMessage').textContent = e.message; }});
@@ -12,10 +12,11 @@ function labels() {
   for (const key of ['volume', 'originalVolume']) $(key + 'Value').textContent = `${Math.round(Number($(key).value) * 100)}%`;
   $('lookaheadValue').textContent = `${$('lookahead').value} 秒`;
   $('customFields').classList.toggle('hidden', $('provider').value !== 'custom');
-  $('azureFields').classList.toggle('hidden', !['azure', 'google-free'].includes($('provider').value));
+  $('azureFields').classList.toggle('hidden', $('provider').value !== 'azure' && !DubCore.isGoogleProvider($('provider').value));
   $('aliyunFields').classList.toggle('hidden', $('provider').value !== 'aliyun');
   $('baiduFields').classList.toggle('hidden', $('provider').value !== 'baidu');
   $('bingFields').classList.toggle('hidden', $('provider').value !== 'bing');
+  $('deeplFields').classList.toggle('hidden', $('provider').value !== 'deepl');
   const captionSettings={...saved};
   for(const key of DubCore.subtitleSettingKeys){const e=$(key);captionSettings[key]=e.type==='checkbox'?e.checked:e.type==='range'?Number(e.value):e.value;}
   DubSubtitles.refreshControls($('captionSettings'),captionSettings);
@@ -45,6 +46,11 @@ $('form').addEventListener('submit', async event => {
   const next = {...saved};
   for (const key of fields) { const e = $(key); next[key] = e.type === 'checkbox' ? e.checked : e.type === 'range' ? Number(e.value) : e.value.trim(); }
   try {
+    if (next.provider === 'deepl') {
+      if (!next.deeplKey || /\s/.test(next.deeplKey)) throw new Error('请填写有效的 DeepL API 密钥');
+      const origin = DubCore.permissionOrigin(DubCore.deeplEndpoint(next.deeplKey));
+      if (!await chrome.permissions.request({origins: [origin]})) throw new Error('未授权 DeepL，设置未保存');
+    }
     if (next.provider === 'bing' && !await chrome.permissions.request(DubCore.bingPermission)) {
       throw new Error('未授权 Bing 翻译网页，设置未保存');
     }
@@ -58,7 +64,7 @@ $('form').addEventListener('submit', async event => {
       const origin = DubCore.permissionOrigin(DubCore.aliyunEndpoint);
       if (!await chrome.permissions.request({origins: [origin]})) throw new Error('未授权阿里云机器翻译，设置未保存');
     }
-    if (next.provider === 'azure' || (next.provider === 'google-free' && next.azureFallback)) {
+    if (next.provider === 'azure' || (DubCore.isGoogleProvider(next.provider) && next.azureFallback)) {
       if (!next.azureKey) throw new Error('请填写 Azure Translator 密钥');
       if (next.azureRegion && !/^[a-z0-9-]{1,64}$/i.test(next.azureRegion)) throw new Error('请填写 Azure 资源的区域代码，例如 eastasia');
       if (!await chrome.permissions.request({origins: [DubCore.azureOrigin]})) throw new Error('未授权微软翻译，设置未保存');

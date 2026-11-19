@@ -21,7 +21,7 @@
     </section>
     <section class="card caption-settings"><h2>字幕设置</h2><p class="muted small">播放器小图标中的“字幕设置”可以即时调整并自动保存。本页预览修改后，点击底部“保存设置”生效。</p><div id="captionSettings"></div></section>
     <section class="card"><h2>翻译服务</h2>
-      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0 免费档</option><option value="bing">微软翻译 · Bing 网页（实验）</option><option value="aliyun">阿里云机器翻译</option><option value="baidu">百度翻译 · 通用文本翻译</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
+      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="google-batch">Google 批量翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0 免费档</option><option value="bing">微软翻译 · Bing 网页（实验）</option><option value="aliyun">阿里云机器翻译</option><option value="baidu">百度翻译 · 通用文本翻译</option><option value="deepl">DeepL · 批量翻译</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
       <p class="muted small">选择 YouTube 时，只读取视频的中文字幕或 YouTube 提供的中文译轨。Google 被限流时，扩展会等待服务恢复。启用 YouTube 优先且还没有译文时，也会自动尝试 YouTube 中文译轨。</p>
       <div id="azureFields" class="hidden">
         <label for="azureKey">微软翻译密钥</label><input id="azureKey" type="password" autocomplete="off">
@@ -43,6 +43,10 @@
         <label for="baiduAppId">百度翻译 APP ID</label><input id="baiduAppId" type="text" inputmode="numeric" maxlength="32" autocomplete="off" spellcheck="false">
         <label for="baiduSecret">百度翻译密钥</label><input id="baiduSecret" type="password" maxlength="128" autocomplete="off">
         <p class="muted small">请在百度翻译开放平台开通通用文本翻译，从管理控制台复制 APP ID 和密钥。待译字幕发往百度，密钥只在本机用于请求签名。超出免费额度后可能计费。 <a href="https://fanyi-api.baidu.com/product/112" target="_blank" rel="noopener noreferrer">百度计费说明</a></p>
+      </div>
+      <div id="deeplFields" class="hidden">
+        <label for="deeplKey">DeepL API 密钥</label><input id="deeplKey" type="password" maxlength="256" autocomplete="off">
+        <p class="muted small">使用自己的 DeepL API 密钥。扩展会按密钥自动选择 Free 或 Pro 接口，并批量发送待译字幕。<a href="https://developers.deepl.com/docs/getting-started/auth" target="_blank" rel="noopener noreferrer">DeepL 配置说明</a></p>
       </div>
       <div id="customFields" class="hidden">
         <label for="endpoint">完整 Chat Completions 地址</label><input id="endpoint" type="url" placeholder="https://你的服务域名/v1/chat/completions" autocomplete="off">

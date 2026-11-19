@@ -81,6 +81,89 @@ test('429 returns retry-after to the progress scheduler', async () => {
   const r = await h.rpc({type: 'TRANSLATE', requestId: '1', text: 'hello'}); assert.equal(r.ok, false); assert.equal(r.retryAfter, 50);
 });
 
+test('Google batch keeps each subtitle paired with its own result and shares the Google cooldown', async () => {
+  let calls = 0;
+  const h = harness({local: {settings: {provider: 'google-batch'}}}, async (url, options) => {
+    calls++;
+    assert.equal(new URL(url).pathname, '/translate_a/t');
+    assert.equal(options.method, 'POST');
+    const body = new URLSearchParams(options.body);
+    assert.equal(body.get('sl'), 'auto');
+    assert.equal(body.get('tl'), 'zh-CN');
+    if (calls === 2) return new Response('', {status: 429, headers: {'Retry-After': '60'}});
+    assert.deepEqual(body.getAll('q'), ['First caption.', 'Second caption.']);
+    return Response.json([['第一句。', 'en'], ['第二句。', 'en']]);
+  });
+  const request = (requestId, text) => ({type: 'TRANSLATE', requestId, text, language: 'auto'});
+  const [first, second] = await Promise.all([h.rpc(request('1', 'First caption.')), h.rpc(request('2', 'Second caption.'))]);
+  assert.equal(first.data.text, '第一句。');
+  assert.equal(second.data.text, '第二句。');
+  assert.equal(calls, 1);
+  const limited = await h.rpc(request('3', 'Next.'));
+  assert.equal(limited.retryAfter, 60);
+  assert.equal(limited.youtubeFallback, true);
+  await h.rpc({type: 'SAVE_SETTINGS', settings: {provider: 'google-free'}}, h.popup);
+  assert.equal((await h.rpc(request('4', 'Next.'))).youtubeFallback, true);
+  assert.equal(calls, 2);
+});
+
+test('canceling a member of an in-flight batch does not interrupt or reassign the remaining translation', async () => {
+  let release, notify;
+  const started = new Promise(resolve => { notify = resolve; });
+  const h = harness({local: {settings: {provider: 'google-batch'}}}, (_url, {signal}) => {
+    notify(signal);
+    return new Promise(resolve => { release = resolve; });
+  });
+  const a = h.rpc({type: 'TRANSLATE', requestId: 'a', language: 'en', text: 'first'});
+  const b = h.rpc({type: 'TRANSLATE', requestId: 'b', language: 'en', text: 'second'});
+  const fetchSignal = await started;
+  await h.rpc({type: 'CANCEL', requestId: 'a'});
+  assert.equal((await a).ok, false);
+  assert.equal(fetchSignal.aborted, false);
+  release(Response.json(['第一句', '第二句']));
+  assert.equal((await b).data.text, '第二句');
+});
+
+test('DeepL chooses Free or Pro using the local key, protects it, and rejects mismatched batches', async () => {
+  const expected = ['https://api-free.deepl.com/v2/translate', 'https://api.deepl.com/v2/translate'];
+  let calls = 0;
+  const h = harness({}, async (url, options) => {
+    assert.equal(url, expected[calls]);
+    assert.equal(options.headers.Authorization, `DeepL-Auth-Key example${calls === 0 ? ':fx' : ''}`);
+    assert.equal(options.credentials, 'omit');
+    const body = JSON.parse(options.body);
+    assert.deepEqual(body, {text: ['one', 'two'], target_lang: 'ZH-HANS'});
+    calls++;
+    return Response.json({translations: calls === 1 ? [{text: '一'}, {text: '二'}] : [{text: '一'}]});
+  });
+  const request = (requestId, text) => ({type: 'TRANSLATE', requestId, text, language: 'en'});
+  for (const key of ['example:fx', 'example']) {
+    await h.rpc({type: 'SAVE_SETTINGS', settings: {provider: 'deepl', deeplKey: key}}, h.popup);
+    const settings = (await h.rpc({type: 'GET_SETTINGS'})).data;
+    assert.equal(settings.deeplConfigured, true);
+    assert.equal('deeplKey' in settings, false);
+    const results = await Promise.all([h.rpc(request('1', 'one')), h.rpc(request('2', 'two'))]);
+    if (key.endsWith(':fx')) assert.deepEqual(results.map(r => r.data.text), ['一', '二']);
+    else assert.ok(results.every(r => !r.ok && /条数/.test(r.error)));
+  }
+  assert.equal(calls, 2);
+  assert.equal((await h.rpc({type: 'SAVE_PLAYER_SETTINGS', settings: {deeplKey: 'unexpected'}})).ok, false);
+});
+
+test('the official Azure provider translates multiple queued captions in a single request', async () => {
+  let calls = 0;
+  const h = harness({local: {settings: {provider: 'azure', azureKey: 'test-key'}}}, async (url, options) => {
+    calls++;
+    assert.equal(new URL(url).hostname, 'api.cognitive.microsofttranslator.com');
+    assert.deepEqual(JSON.parse(options.body), [{Text: 'One.'}, {Text: 'Two.'}]);
+    return Response.json(['一。', '二。'].map(text => ({translations: [{to: 'zh-Hans', text}]})));
+  });
+  const results = await Promise.all(['One.', 'Two.'].map((text, i) =>
+    h.rpc({type: 'TRANSLATE', requestId: `azure-${i}`, text, language: 'en'})));
+  assert.deepEqual(results.map(item => item.data.text), ['一。', '二。']);
+  assert.equal(calls, 1);
+});
+
 test('Google 429 backs off across video tabs and enables a YouTube retry without requesting Azure by default', async () => {
   let calls = 0;
   const retryDate = new Date(Date.now() + 90000).toUTCString();

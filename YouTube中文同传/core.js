@@ -619,6 +619,10 @@
   const baiduEndpoint = 'https://fanyi-api.baidu.com/api/trans/vip/translate';
   const bingUrl = 'https://www.bing.com/translator?mkt=zh-CN';
   const bingPermission = {permissions: ['scripting'], origins: ['https://www.bing.com/*', 'https://cn.bing.com/*']};
+  const isGoogleProvider = provider => provider === 'google-free' || provider === 'google-batch';
+  function deeplEndpoint(key) {
+    return key.endsWith(':fx') ? 'https://api-free.deepl.com/v2/translate' : 'https://api.deepl.com/v2/translate';
+  }
   function hasBaiduCredentials(settings) {
     return /^\d{1,32}$/.test(settings.baiduAppId || '') && /^[!-~]{1,128}$/.test(settings.baiduSecret || '');
   }
@@ -649,7 +653,7 @@
     subtitle: true, bilingual: true, autoTranslate: true, autoStart: true,
     syncMode: 'complete', provider: 'google-free', endpoint: '', apiKey: '', model: '',
     azureKey: '', azureRegion: '', azureFallback: false,
-    aliyunAccessKeyId: '', aliyunAccessKeySecret: '', baiduAppId: '', baiduSecret: '', cacheRevision: 0, ...subtitleDefaults
+    aliyunAccessKeyId: '', aliyunAccessKeySecret: '', baiduAppId: '', baiduSecret: '', deeplKey: '', cacheRevision: 0, ...subtitleDefaults
   };
   function sanitizeSettings(input) {
     const s = {...defaults, ...input};
@@ -658,11 +662,12 @@
     }
     for (const key of ['subtitle', 'bilingual', 'autoTranslate', 'autoStart']) s[key] = !!s[key];
     s.syncMode = s.syncMode === 'complete' ? 'complete' : 'follow';
-    s.provider = ['google-free', 'youtube', 'azure', 'bing', 'aliyun', 'baidu', 'custom'].includes(s.provider) ? s.provider : defaults.provider;
+    s.provider = ['google-free', 'google-batch', 'youtube', 'azure', 'bing', 'aliyun', 'baidu', 'deepl', 'custom'].includes(s.provider) ? s.provider : defaults.provider;
     for (const key of ['voice', 'endpoint', 'apiKey', 'model', 'azureKey']) s[key] = String(s[key] || '').slice(0, 2048);
     s.azureRegion = String(s.azureRegion || '').trim().toLowerCase().slice(0, 64);
     s.azureFallback = s.azureFallback === true;
     for (const key of ['aliyunAccessKeyId', 'aliyunAccessKeySecret', 'baiduAppId', 'baiduSecret']) s[key] = String(s[key] || '').trim();
+    s.deeplKey = String(s.deeplKey || '').trim().slice(0, 256);
     s.cacheRevision = Number(s.cacheRevision) || 0;
     for (const [key,field] of Object.entries(subtitleFields)) {
       if (field.type === 'range') s[key] = clamp(Number.isFinite(Number(s[key])) ? Number(s[key]) : field.value, field.min, field.max);
@@ -681,9 +686,9 @@
   function publicSettings(s) {
     const sanitized = sanitizeSettings(s);
     const {apiKey, azureKey, azureRegion, azureFallback, aliyunAccessKeyId, aliyunAccessKeySecret,
-      baiduAppId, baiduSecret, ...rest} = sanitized;
+      baiduAppId, baiduSecret, deeplKey, ...rest} = sanitized;
     return {...rest, azureConfigured: !!azureKey.trim(), aliyunConfigured: hasAliyunCredentials(sanitized),
-      baiduConfigured: hasBaiduCredentials(sanitized)};
+      baiduConfigured: hasBaiduCredentials(sanitized), deeplConfigured: !!deeplKey};
   }
   function cacheKey(cue, lang, settings) {
     const context=cue.automatic && settings.provider==='custom'?`${cue.contextBefore||''}|${cue.contextAfter||''}`:'';
@@ -800,7 +805,7 @@
       return Math.max(0, last - position);
     }
   }
-  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, sameCaptionSource, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, azureOrigin, aliyunEndpoint, hasAliyunCredentials, baiduEndpoint, hasBaiduCredentials, splitTranslationText, bingUrl, bingPermission, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
+  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, sameCaptionSource, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, azureOrigin, aliyunEndpoint, hasAliyunCredentials, baiduEndpoint, hasBaiduCredentials, splitTranslationText, bingUrl, bingPermission, isGoogleProvider, deeplEndpoint, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
   root.DubCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

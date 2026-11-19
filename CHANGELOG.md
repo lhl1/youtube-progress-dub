@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0 — 2026-11-20
+
+- Add Google batch translation and the official DeepL Free and Pro API as selectable providers.
+- Batch subtitle requests for Google batch, DeepL and Azure while preserving each cue's result, cancellation and timing.
+- Share the Google cooldown and existing fallback behavior between Google modes.
+
 ## 1.7.9 — 2026-11-20
 
 - Add experimental Bing web translation through a dedicated Bing Translator tab. It uses the website's own translation flow and pauses when Bing requests verification or rate limits requests.

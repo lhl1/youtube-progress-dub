@@ -142,7 +142,7 @@
     if (!youtubeFallbackPending || loading) return;
     youtubeFallbackPending = false;
     if (!active || triedYouTubeFallback || isLive || !settings.autoTranslate ||
-        settings.provider !== 'google-free' || scheduler.cache.size) return;
+        !C.isGoogleProvider(settings.provider) || scheduler.cache.size) return;
     triedYouTubeFallback = true;
     loadCaptions(true, {fallback: true}).catch(error => report(error.message));
   }
@@ -166,7 +166,7 @@
       const matchesSelected = !selected || C.sameCaptionSource(original, captured, tracks);
       const automatic = C.isAutomaticTrack(selected, base);
       const englishAsr = /^en(?:-|$)/i.test(lang) && automatic;
-      const preferYouTube = youtubeOnly || (settings.autoTranslate && !englishAsr && settings.provider === 'google-free');
+      const preferYouTube = youtubeOnly || (settings.autoTranslate && !englishAsr && C.isGoogleProvider(settings.provider));
       if (preferYouTube && !C.isChinese(lang)) {
         if (matchesSelected && C.isChinese(capturedLang)) {
           candidates.push({url: captured.href, lang: capturedLang, translated: true, automatic: capturedAutomatic(captured.href), name: 'YouTube 自动翻译中文'});
@@ -401,6 +401,7 @@
   }
   async function applySettings(next) {
     const old = settings; settings = C.sanitizeSettings(next); scheduler.settings = settings;
+    scheduler.concurrency = ['google-batch', 'azure', 'deepl'].includes(settings.provider) ? 4 : 2;
     if (active) duckVolume();
     if (active && (old.provider !== settings.provider || old.cacheRevision !== settings.cacheRevision || old.autoTranslate !== settings.autoTranslate)) {
       loadSerial++; loading = false; triedYouTubeFallback = youtubeFallbackPending = false; sourceName = '';

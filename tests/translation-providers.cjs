@@ -27,11 +27,18 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
       globalThis.googleCalls = 0;
       globalThis.aliyunCalls = [];
       globalThis.baiduCalls = [];
+      globalThis.batchCalls = [];
+      globalThis.deeplCalls = [];
       const originalContains = chrome.permissions.contains.bind(chrome.permissions);
-      const fixtureOrigins = ['https://mt.aliyuncs.com/*', 'https://fanyi-api.baidu.com/*'];
+      const fixtureOrigins = ['https://mt.aliyuncs.com/*', 'https://fanyi-api.baidu.com/*', 'https://api-free.deepl.com/*'];
       chrome.permissions.contains = details => details.origins?.some(origin => fixtureOrigins.includes(origin))
         ? Promise.resolve(true) : originalContains(details);
       globalThis.fetch = async (url, options) => {
+        if (String(url).startsWith('https://translate.googleapis.com/translate_a/t?')) {
+          const texts = new URLSearchParams(options.body).getAll('q');
+          batchCalls.push(texts);
+          return Response.json(texts.map((text, index) => `批量译文 ${index + 1}`));
+        }
         if (String(url).startsWith('https://translate.googleapis.com/')) {
           globalThis.googleCalls++;
           return new Response('', {status: 429, headers: {'Retry-After': '45'}});
@@ -43,6 +50,11 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
         if (url === 'https://fanyi-api.baidu.com/api/trans/vip/translate') {
           baiduCalls.push(Object.fromEntries(new URLSearchParams(options.body)));
           return Response.json({trans_result: [{dst: '这是百度通用文本翻译。'}]});
+        }
+        if (url === 'https://api-free.deepl.com/v2/translate') {
+          const request = JSON.parse(options.body);
+          deeplCalls.push(request);
+          return Response.json({translations: request.text.map(() => ({text: 'DeepL 译文。'}))});
         }
         return native(url, options);
       };
@@ -57,6 +69,9 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
       const events = id === 'unavailable' && translated ? [] : [{
         tStartMs: 0, dDurationMs: 5000, segs: [{utf8: translated ? '这是站内译文。' : 'This is a complete sentence.'}]
       }];
+      if (['batch-selected', 'deepl-selected'].includes(id)) {
+        events.push({tStartMs: 12000, dDurationMs: 5000, segs: [{utf8: 'A second independent sentence.'}]});
+      }
       return route.fulfill({json: {events}});
     });
     async function check(id, provider, ready) {
@@ -85,6 +100,11 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     assert.equal(await worker.evaluate(() => googleCalls), 0);
     assert.ok(captionRequests.some(r => r.id === 'youtube-first' && r.translated));
     console.log('PASS YouTube-only mode reads translated ASR without Google');
+    const batched = await check('batch-selected', 'google-batch', state => state.readySeconds >= 16);
+    assert.equal(batched.cues, 2);
+    const batchCalls = await worker.evaluate(() => globalThis.batchCalls);
+    assert.deepEqual(batchCalls, [['This is a complete sentence.', 'A second independent sentence.']]);
+    console.log('PASS Google batches two separate ASR cues and buffers both translations');
     const fallback = await check('google-limited', 'google-free', state => state.language === 'zh-Hans');
     assert.equal(fallback.automatic, true);
     assert.ok(captionRequests.some(r => r.id === 'google-limited' && !r.translated));
@@ -101,7 +121,7 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     await options.waitForFunction(() => document.querySelector('#provider').value === 'youtube');
     await options.evaluate(() => {
       const request = chrome.permissions.request.bind(chrome.permissions);
-      const fixtureOrigins = ['https://mt.aliyuncs.com/*', 'https://fanyi-api.baidu.com/*'];
+      const fixtureOrigins = ['https://mt.aliyuncs.com/*', 'https://fanyi-api.baidu.com/*', 'https://api-free.deepl.com/*'];
       chrome.permissions.request = details => details.origins?.some(origin => fixtureOrigins.includes(origin))
         ? Promise.resolve(true) : request(details);
     });
@@ -124,7 +144,6 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
     await options.locator('#baiduSecret').fill('FixtureSigningSecret');
     await options.locator('button[type=submit]').click();
     await options.waitForFunction(() => document.querySelector('#message').textContent.includes('已保存'));
-    await options.close();
     const baidu = await check('baidu-selected', null, state => state.readySeconds > 0);
     assert.equal(baidu.settings.provider, 'baidu');
     assert.equal(baidu.settings.baiduConfigured, true);
@@ -134,6 +153,18 @@ const fixture = id => `<div id="movie_player"><video class="html5-main-video"></
       /^[0-9a-f]{32}$/.test(call.sign) && call.q.includes('This is a complete sentence.')));
     assert.equal(await worker.evaluate(() => googleCalls), googleCallsAfterFallback);
     console.log('PASS Baidu settings save through the UI and the player receives a signed API fixture translation');
+    await options.locator('#provider').selectOption('deepl');
+    await options.locator('#deeplKey').fill('ExampleKey:fx');
+    await options.locator('button[type=submit]').click();
+    await options.waitForFunction(() => document.querySelector('#message').textContent.includes('已保存'));
+    await options.close();
+    const deepl = await check('deepl-selected', null, state => state.readySeconds >= 16);
+    assert.equal(deepl.settings.deeplConfigured, true);
+    assert.ok(!deepl.settings.deeplKey);
+    assert.equal(deepl.cues, 2);
+    const deeplCalls = await worker.evaluate(() => globalThis.deeplCalls);
+    assert.deepEqual(deeplCalls, [{target_lang: 'ZH-HANS', text: ['This is a complete sentence.', 'A second independent sentence.']}]);
+    console.log('PASS DeepL settings save and the player receives both rows from the Free endpoint');
   } finally {
     await context.close();
   }

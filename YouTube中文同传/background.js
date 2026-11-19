@@ -3,6 +3,7 @@ importScripts('core.js', 'baidu-signature.js', 'bing-page.js');
 const C = DubCore;
 const controllers = new Map();
 let googleRetryAt = 0;
+const translationBatches = new Map();
 let baiduRequests = Promise.resolve();
 let baiduNextAt = 0;
 let baiduRetryAt = 0;
@@ -44,7 +45,100 @@ async function fetchLimited(url, options, signal, ms = 12000) {
     throw e;
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
-async function translateAzure(text, config, signal, timeout) {
+function flushTranslationBatch(batchKey, batch) {
+  clearTimeout(batch.timer);
+  if (translationBatches.get(batchKey) === batch) translationBatches.delete(batchKey);
+  const jobs = [...batch.jobs];
+  if (!jobs.length) return;
+  batch.controller = new AbortController();
+  Promise.resolve().then(() => batch.send(jobs.map(job => job.text), batch.controller.signal)).then(results => {
+    if (!Array.isArray(results) || results.length !== jobs.length) {
+      throw new Error('翻译服务返回的条数与字幕不符，将重试');
+    }
+    results.forEach((text, index) => {
+      const job = jobs[index];
+      if (typeof text !== 'string' || !text.trim() || text.length > 12000) {
+        job.finish(new Error('翻译服务未返回有效的字幕译文'));
+      } else job.finish(null, text.trim());
+    });
+  }).catch(error => {
+    for (const job of jobs) job.finish(Object.assign(new Error(error.message), error));
+  });
+}
+function translateInBatch(batchKey, text, signal, send) {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    let batch = translationBatches.get(batchKey);
+    const maxCharacters = 12000;
+    if (batch && batch.characters + text.length > maxCharacters) {
+      flushTranslationBatch(batchKey, batch);
+      batch = null;
+    }
+    if (!batch) {
+      batch = {jobs: new Set(), characters: 0, send};
+      const current = batch;
+      batch.timer = setTimeout(() => flushTranslationBatch(batchKey, current), 55);
+      translationBatches.set(batchKey, batch);
+    }
+    const job = {text, finish};
+    function finish(error, result) {
+      if (!batch.jobs.delete(job)) return;
+      batch.characters -= text.length;
+      signal.removeEventListener('abort', abort);
+      if (error) reject(error);
+      else resolve(result);
+    }
+    function abort() {
+      finish(signal.reason || new Error('请求已取消'));
+      if (!batch.jobs.size) {
+        if (batch.controller) batch.controller.abort();
+        else flushTranslationBatch(batchKey, batch);
+      }
+    }
+    batch.jobs.add(job);
+    batch.characters += text.length;
+    signal.addEventListener('abort', abort, {once: true});
+    if (batch.jobs.size === 4) flushTranslationBatch(batchKey, batch);
+  });
+}
+async function translateDeepL(texts, config, signal) {
+  const endpoint = C.deeplEndpoint(config.deeplKey);
+  if (!await chrome.permissions.contains({origins: [C.permissionOrigin(endpoint)]})) {
+    throw new Error('请在扩展设置中保存并授权 DeepL');
+  }
+  try {
+    const body = await fetchLimited(endpoint, {method: 'POST', credentials: 'omit',
+      headers: {'Content-Type': 'application/json', Authorization: `DeepL-Auth-Key ${config.deeplKey}`},
+      body: JSON.stringify({text: texts, target_lang: 'ZH-HANS'})}, signal);
+    const data = JSON.parse(body);
+    return Array.isArray(data?.translations) ? data.translations.map(item => item?.text) : null;
+  } catch (error) {
+    if (error.status === 456) {
+      error.message = 'DeepL 翻译额度已用完，请检查账户用量';
+      error.retryAfter = 300;
+    } else if ([401, 403].includes(error.status)) error.message = 'DeepL 未授权，请检查 API 密钥和套餐';
+    throw error;
+  }
+}
+function assertGoogleAvailable() {
+  if (Date.now() >= googleRetryAt) return;
+  const error = new Error('Google 翻译限流，稍后自动重试');
+  error.status = 429;
+  error.coolingDown = true;
+  error.retryAfter = Math.ceil((googleRetryAt - Date.now()) / 1000);
+  throw error;
+}
+async function translateGoogleBatch(texts, language, signal, timeout) {
+  assertGoogleAvailable();
+  const body = new URLSearchParams({sl: language, tl: 'zh-CN'});
+  for (const text of texts) body.append('q', text);
+  const response = await fetchLimited('https://translate.googleapis.com/translate_a/t?client=gtx&dt=t&format=txt',
+    {method: 'POST', credentials: 'omit', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: body.toString()}, signal, timeout);
+  const data = JSON.parse(response);
+  return Array.isArray(data) ? data.map(item => Array.isArray(item) ? item[0] : item) : null;
+}
+async function translateAzureBatch(texts, config, signal, timeout) {
   if (!config.azureKey.trim()) throw new Error('请先在扩展设置中填写微软翻译密钥');
   if (!await chrome.permissions.contains({origins: [C.azureOrigin]})) throw new Error('请在扩展设置中保存并授权微软翻译');
   const headers = {'Content-Type': 'application/json', 'Ocp-Apim-Subscription-Key': config.azureKey.trim()};
@@ -52,15 +146,19 @@ async function translateAzure(text, config, signal, timeout) {
   try {
     const endpoint = 'https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=zh-Hans';
     const data = JSON.parse(await fetchLimited(endpoint, {method: 'POST', headers, credentials: 'omit',
-      body: JSON.stringify([{Text: text}])}, signal, timeout));
-    const result = data?.[0]?.translations?.find?.(item => item?.to === 'zh-Hans')?.text;
-    if (typeof result !== 'string' || !result.trim() || result.length > 12000) throw new Error('微软翻译未返回有效的简体中文译文');
-    return {text: result.trim(), via: 'azure'};
+      body: JSON.stringify(texts.map(text => ({Text: text})))}, signal, timeout));
+    return Array.isArray(data)
+      ? data.map(row => row?.translations?.find?.(item => item?.to === 'zh-Hans')?.text) : null;
   } catch (error) {
     if ([401,403].includes(error.status)) error.message = '微软翻译未授权或额度已用完，请检查密钥、区域和 Azure 配额';
     if (error.status === 429) error.message = '微软翻译已达到请求限额，稍后自动重试';
     throw error;
   }
+}
+async function translateAzure(batchKey, text, config, signal, timeout) {
+  const result = await translateInBatch(batchKey, text, signal,
+    (texts, combined) => translateAzureBatch(texts, config, combined, timeout));
+  return {text: result, via: 'azure'};
 }
 async function signAliyunRequest(body, config) {
   const encoder = new TextEncoder();
@@ -217,13 +315,18 @@ async function translateBaidu(text, language, config, signal) {
     throw error;
   }
 }
-async function translate(text, language, config, signal, {automatic=false, source=text, before="", after=""}={}) {
+async function translate(text, language, config, signal, {automatic=false, source=text, before="", after="", tabId}={}) {
   if (C.isChinese(language)) return text;
+  const batchKey = JSON.stringify([tabId, config.provider, config.cacheRevision, language]);
   if (config.provider === 'youtube') throw new Error('当前视频没有可读的 YouTube 中文译轨');
-  if (config.provider === 'azure') return translateAzure(text, config, signal);
+  if (config.provider === 'azure') return translateAzure(batchKey, text, config, signal);
   if (config.provider === 'aliyun') return translateAliyun(text, language, config, signal);
   if (config.provider === 'baidu') return translateBaidu(text, language, config, signal);
   if (config.provider === 'bing') return translateBing(text, signal);
+  if (config.provider === 'deepl') {
+    if (!config.deeplKey) throw new Error('请先在扩展设置中填写 DeepL API 密钥');
+    return translateInBatch(batchKey, text, signal, (texts, combined) => translateDeepL(texts, config, combined));
+  }
   if (config.provider === 'custom') {
     const u = new URL(config.endpoint);
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname))) throw new Error('翻译地址需要 HTTPS 或本机地址');
@@ -245,15 +348,13 @@ async function translate(text, language, config, signal, {automatic=false, sourc
   const q = new URLSearchParams({client: 'gtx', sl: language || 'auto', tl: 'zh-CN', dt: 't', q: text});
   let data, result;
   try {
-    if (Date.now() < googleRetryAt) {
-      const error = new Error('Google 翻译限流，稍后自动重试');
-      error.status = 429;
-      error.coolingDown = true;
-      error.retryAfter = Math.ceil((googleRetryAt - Date.now()) / 1000);
-      throw error;
+    assertGoogleAvailable();
+    const timeout = config.azureFallback && config.azureKey.trim() ? 6500 : 12000;
+    if (config.provider === 'google-batch') {
+      return await translateInBatch(batchKey, text, signal,
+        (texts, combined) => translateGoogleBatch(texts, language, combined, timeout));
     }
-    const body = await fetchLimited(`https://translate.googleapis.com/translate_a/single?${q}`, {credentials: 'omit'}, signal,
-      config.azureFallback && config.azureKey.trim() ? 6500 : 12000);
+    const body = await fetchLimited(`https://translate.googleapis.com/translate_a/single?${q}`, {credentials: 'omit'}, signal, timeout);
     data = JSON.parse(body);
     if (!Array.isArray(data?.[0])) throw new Error('Google 翻译响应格式变化');
     result = data[0].filter(x => Array.isArray(x) && typeof x[0] === 'string').map(x => x[0]).join('');
@@ -263,7 +364,7 @@ async function translate(text, language, config, signal, {automatic=false, sourc
     if (error.status === 429 && !error.coolingDown) googleRetryAt = Math.max(googleRetryAt, Date.now() + error.retryAfter * 1000);
     error.youtubeFallback = true;
     if (config.azureFallback && config.azureKey.trim()) {
-      try { return await translateAzure(text, config, signal, 8000); }
+      try { return await translateAzure(batchKey + ':azure', text, config, signal, 8000); }
       catch (backup) {
         if (signal.aborted) throw backup;
         error.message += `，微软备用暂不可用（${backup.message}）`;
@@ -341,7 +442,7 @@ async function handle(m, sender) {
     const task = settingsWrites.then(async () => {
       const previous = await settings(), s = C.sanitizeSettings({...previous, ...m.settings});
       if (['provider', 'endpoint', 'apiKey', 'model', 'azureKey', 'azureRegion', 'azureFallback',
-        'aliyunAccessKeyId', 'aliyunAccessKeySecret', 'baiduAppId', 'baiduSecret'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
+        'aliyunAccessKeyId', 'aliyunAccessKeySecret', 'baiduAppId', 'baiduSecret', 'deeplKey'].some(k => previous[k] !== s[k])) s.cacheRevision = previous.cacheRevision + 1;
       await chrome.storage.local.set({settings: s});
       const tabs = await chrome.tabs.query({url: 'https://www.youtube.com/*'});
       for (const tab of tabs) chrome.tabs.sendMessage(tab.id, {type: 'SETTINGS_CHANGED', settings: C.publicSettings(s)}).catch(() => {});
@@ -357,7 +458,8 @@ async function handle(m, sender) {
       const source=automatic&&typeof m.sourceText==='string'&&m.sourceText.length<=4500&&m.text.startsWith(m.sourceText)?m.sourceText:m.text;
       const before=automatic&&typeof m.contextBefore==='string'?m.contextBefore.slice(-400):'';
       const after=automatic&&typeof m.contextAfter==='string'?m.contextAfter.slice(0,400):'';
-      const result=await translate(m.text,String(m.language||'auto').slice(0,20),await settings(),controller.signal,{automatic,source,before,after});
+      const result=await translate(m.text,String(m.language||'auto').slice(0,20),await settings(),controller.signal,
+        {automatic,source,before,after,tabId:sender.tab.id});
       return typeof result==='string'?{text:result}:result;
     }
     finally { if (controllers.get(id) === controller) controllers.delete(id); }
