@@ -15,6 +15,7 @@ function labels() {
   $('azureFields').classList.toggle('hidden', !['azure', 'google-free'].includes($('provider').value));
   $('aliyunFields').classList.toggle('hidden', $('provider').value !== 'aliyun');
   $('baiduFields').classList.toggle('hidden', $('provider').value !== 'baidu');
+  $('bingFields').classList.toggle('hidden', $('provider').value !== 'bing');
   const captionSettings={...saved};
   for(const key of DubCore.subtitleSettingKeys){const e=$(key);captionSettings[key]=e.type==='checkbox'?e.checked:e.type==='range'?Number(e.value):e.value;}
   DubSubtitles.refreshControls($('captionSettings'),captionSettings);
@@ -44,6 +45,9 @@ $('form').addEventListener('submit', async event => {
   const next = {...saved};
   for (const key of fields) { const e = $(key); next[key] = e.type === 'checkbox' ? e.checked : e.type === 'range' ? Number(e.value) : e.value.trim(); }
   try {
+    if (next.provider === 'bing' && !await chrome.permissions.request(DubCore.bingPermission)) {
+      throw new Error('未授权 Bing 翻译网页，设置未保存');
+    }
     if (next.provider === 'baidu') {
       if (!DubCore.hasBaiduCredentials(next)) throw new Error('请填写有效的百度翻译 APP ID 和密钥');
       const origin = DubCore.permissionOrigin(DubCore.baiduEndpoint);
@@ -70,6 +74,12 @@ $('form').addEventListener('submit', async event => {
     await rpc({type: 'SAVE_SETTINGS', settings: next}); saved = {...next};
     $('message').textContent = '设置已保存，当前视频立即生效。'; $('message').classList.add('success');
   } catch (e) { $('message').textContent = e.message; $('message').classList.remove('success'); }
+});
+$('openBing').addEventListener('click', async () => {
+  try {
+    if (!await chrome.permissions.request(DubCore.bingPermission)) throw new Error('未授权 Bing 翻译网页');
+    await rpc({type: 'OPEN_BING_TRANSLATOR'});
+  } catch (error) { $('bingMessage').textContent = error.message; }
 });
 $('testVoice').addEventListener('click', () => {
   engine.failedVoices.clear();

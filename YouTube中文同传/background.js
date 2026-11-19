@@ -1,4 +1,4 @@
-importScripts('core.js', 'baidu-signature.js');
+importScripts('core.js', 'baidu-signature.js', 'bing-page.js');
 'use strict';
 const C = DubCore;
 const controllers = new Map();
@@ -223,6 +223,7 @@ async function translate(text, language, config, signal, {automatic=false, sourc
   if (config.provider === 'azure') return translateAzure(text, config, signal);
   if (config.provider === 'aliyun') return translateAliyun(text, language, config, signal);
   if (config.provider === 'baidu') return translateBaidu(text, language, config, signal);
+  if (config.provider === 'bing') return translateBing(text, signal);
   if (config.provider === 'custom') {
     const u = new URL(config.endpoint);
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname))) throw new Error('翻译地址需要 HTTPS 或本机地址');
@@ -312,6 +313,15 @@ async function pruneCache() {
 async function handle(m, sender) {
   const trusted = extensionPage(sender), yt = youtubePage(sender);
   if (!trusted && !yt) throw new Error('消息来源不受支持');
+  if (m.type === 'OPEN_BING_TRANSLATOR') {
+    if (!trusted) throw new Error('请从扩展设置打开 Bing 翻译页');
+    await openBingTranslator();
+    return {};
+  }
+  if (m.type === 'RESUME_BING_TRANSLATOR') {
+    if ((await settings()).provider === 'bing') await resumeBingTranslator();
+    return {};
+  }
   if (m.type === 'OPEN_OPTIONS') { await chrome.runtime.openOptionsPage(); return {}; }
   if (m.type === 'CLAIM_AUDIO') {
     if (!yt) throw new Error('仅限视频页面');
@@ -412,6 +422,9 @@ chrome.webRequest.onCompleted.addListener(async details => {
     chrome.tabs.sendMessage(details.tabId, {type: 'CAPTION_CAPTURED', videoId: video, url: details.url}).catch(() => {});
   } catch {}
 }, {urls: ['https://www.youtube.com/api/timedtext*']});
+chrome.webRequest.onCompleted.addListener(watchBingTranslation, {
+  urls: ['https://www.bing.com/ttranslatev3*', 'https://cn.bing.com/ttranslatev3*']
+}, ['responseHeaders']);
 chrome.tabs.onRemoved.addListener(async tabId => {
   for (const [id, c] of controllers) if (id.startsWith(`${tabId}:`)) { c.abort(); controllers.delete(id); }
   const all = await chrome.storage.session.get(null);

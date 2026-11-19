@@ -225,11 +225,14 @@
 | Google 翻译（默认） | 不需要 | 安装后即可使用。接口可能限流或变化，可用性不由本项目保证。 |
 | YouTube 字幕翻译 | 不需要 | 读取视频已有的中文字幕或 YouTube 中文译轨，包括可翻译的自动字幕。取不到时，可在 YouTube 的「字幕 → 自动翻译」中选简体中文。 |
 | 微软翻译（Azure Translator） | 需要 | 创建 F0 免费档资源，在扩展设置填密钥和资源区域。可单独选用，也可勾选为 Google 失败时的备用。 |
+| 微软翻译 · Bing 网页（实验） | 不需要 | 使用专用的 Bing 翻译标签页。遇到验证时在该页手动完成，再回播放器点「恢复 / 重试」。 |
 | 阿里云机器翻译 | 需要 | 开通机器翻译通用版，在扩展设置填写 RAM 用户的 AccessKey ID 和 Secret。按阿里云通用版额度计费。 |
 | 百度翻译 · 通用文本翻译 | 需要 | 在百度翻译开放平台开通通用文本翻译，用控制台提供的 APP ID 和密钥。 |
 | 自定义翻译接口 | 取决于服务 | 填写自己的服务地址、模型名与密钥。 |
 
 Google 限流后，扩展按服务返回的等待时间暂停请求。如果启用了「优先使用 YouTube 中文翻译」且本视频仍无译文，扩展会尝试 YouTube 中文译轨。需要微软备用时，在「配置接口与密钥」勾选允许使用微软翻译额度并保存。
+
+使用 Bing 网页时，在「配置接口与密钥」选择该选项并保存授权，然后点「打开 Bing 翻译页」并切回 YouTube。保留扩展打开的标签页，字幕只会填入这一个页面。网页需要验证时，打开该页按微软提示操作，再回播放器点「恢复 / 重试」。[Bing 翻译网页](https://www.bing.com/translator?mkt=zh-CN)
 
 使用阿里云时，在「配置接口与密钥」中选择「阿里云机器翻译」，填写两项 AccessKey，保存并授权访问 `mt.aliyuncs.com`。建议使用仅有 `alimt:TranslateGeneral` 权限的 RAM 用户密钥。待译字幕发往阿里云，Secret 保存在本机并用于请求签名。[阿里云接口与权限](https://help.aliyun.com/zh/machine-translation/developer-reference/api-alimt-2018-10-12-translategeneral) · [阿里云计费说明](https://help.aliyun.com/zh/machine-translation/product-overview/pricing-of-machine-translation-general-purpose-edition)
 
@@ -295,6 +298,7 @@ Google 限流后，扩展按服务返回的等待时间暂停请求。如果启�
 | --- | --- |
 | Google 翻译 | 需要翻译的字幕片段。 |
 | 微软翻译 | 选择微软服务或启用微软备用后，需要翻译的字幕片段。 |
+| Bing 翻译网页 | 选用时，待译字幕会填入扩展打开的 Bing 网页，由网页发送翻译请求。 |
 | 阿里云机器翻译 | 选用后，待译字幕发往阿里云官方接口。 |
 | 百度通用文本翻译 | 选用后，待译字幕发往百度官方接口。 |
 | 你配置的自定义服务 | 需要翻译的字幕片段，以及该服务使用的密钥。 |

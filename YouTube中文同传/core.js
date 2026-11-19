@@ -617,6 +617,8 @@
   const azureOrigin = 'https://api.cognitive.microsofttranslator.com/*';
   const aliyunEndpoint = 'https://mt.aliyuncs.com/';
   const baiduEndpoint = 'https://fanyi-api.baidu.com/api/trans/vip/translate';
+  const bingUrl = 'https://www.bing.com/translator?mkt=zh-CN';
+  const bingPermission = {permissions: ['scripting'], origins: ['https://www.bing.com/*', 'https://cn.bing.com/*']};
   function hasBaiduCredentials(settings) {
     return /^\d{1,32}$/.test(settings.baiduAppId || '') && /^[!-~]{1,128}$/.test(settings.baiduSecret || '');
   }
@@ -656,7 +658,7 @@
     }
     for (const key of ['subtitle', 'bilingual', 'autoTranslate', 'autoStart']) s[key] = !!s[key];
     s.syncMode = s.syncMode === 'complete' ? 'complete' : 'follow';
-    s.provider = ['google-free', 'youtube', 'azure', 'aliyun', 'baidu', 'custom'].includes(s.provider) ? s.provider : defaults.provider;
+    s.provider = ['google-free', 'youtube', 'azure', 'bing', 'aliyun', 'baidu', 'custom'].includes(s.provider) ? s.provider : defaults.provider;
     for (const key of ['voice', 'endpoint', 'apiKey', 'model', 'azureKey']) s[key] = String(s[key] || '').slice(0, 2048);
     s.azureRegion = String(s.azureRegion || '').trim().toLowerCase().slice(0, 64);
     s.azureFallback = s.azureFallback === true;
@@ -798,7 +800,7 @@
       return Math.max(0, last - position);
     }
   }
-  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, sameCaptionSource, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, azureOrigin, aliyunEndpoint, hasAliyunCredentials, baiduEndpoint, hasBaiduCredentials, splitTranslationText, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
+  const api = {clamp, clean, isChinese, videoId, parseJson3, parseVtt, parseCaptions, normalize, sentenceRanges, englishRanges, subtitlePages, translationInput, validatedAlignment, pageSource, speechParts, narrationParts, chineseNumber, originalLanguage, narrationSeekOffset, isAutomaticTrack, isAutomaticCapture, sameCaptionSource, prepareCues, groupCues, lowerBound, chooseTrack, hash, defaults, azureOrigin, aliyunEndpoint, hasAliyunCredentials, baiduEndpoint, hasBaiduCredentials, splitTranslationText, bingUrl, bingPermission, subtitleFields, subtitleSettingKeys, playerSettingKeys, subtitlePresets, subtitleCue, sanitizeSettings, publicSettings, cacheKey, permissionOrigin, speechRate, NarrationQueue, Scheduler};
   root.DubCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

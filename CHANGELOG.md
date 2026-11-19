@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.9 — 2026-11-20
+
+- Add experimental Bing web translation through a dedicated Bing Translator tab. It uses the website's own translation flow and pauses when Bing requests verification or rate limits requests.
+
 ## 1.7.8 — 2026-11-19
 
 - Add Baidu General Text Translation with local APP ID and key settings, signed requests, and standard-plan pacing and request size.

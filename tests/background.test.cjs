@@ -20,6 +20,7 @@ function harness(existing = {}, fetchImpl = async () => new Response('[[["你好
   const context = vm.createContext({chrome, DubCore: C, importScripts() {}, fetch: fetchImpl, URL, URLSearchParams,
     AbortController, AbortSignal, setTimeout, clearTimeout, console, Date, Response, crypto: webcrypto, TextEncoder});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../YouTube中文同传/baidu-signature.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../YouTube中文同传/bing-page.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../YouTube中文同传/background.js'), 'utf8'), context);
   const yt = {url: 'https://www.youtube.com/watch?v=test-id', frameId: 0, tab: {id: 7}}, popup = {url: 'chrome-extension://test/popup.html'};
   const rpc = (m, sender = yt) => new Promise(resolve => listeners.message(m, sender, resolve));

@@ -21,13 +21,18 @@
     </section>
     <section class="card caption-settings"><h2>字幕设置</h2><p class="muted small">播放器小图标中的“字幕设置”可以即时调整并自动保存。本页预览修改后，点击底部“保存设置”生效。</p><div id="captionSettings"></div></section>
     <section class="card"><h2>翻译服务</h2>
-      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0 免费档</option><option value="aliyun">阿里云机器翻译</option><option value="baidu">百度翻译 · 通用文本翻译</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
+      <label for="provider">字幕没有中文时</label><select id="provider"><option value="google-free">Google 翻译 · 无需密钥</option><option value="youtube">YouTube 字幕翻译 · 无需密钥</option><option value="azure">微软翻译 · Azure F0 免费档</option><option value="bing">微软翻译 · Bing 网页（实验）</option><option value="aliyun">阿里云机器翻译</option><option value="baidu">百度翻译 · 通用文本翻译</option><option value="custom">自定义翻译接口 · OpenAI 兼容</option></select>
       <p class="muted small">选择 YouTube 时，只读取视频的中文字幕或 YouTube 提供的中文译轨。Google 被限流时，扩展会等待服务恢复。启用 YouTube 优先且还没有译文时，也会自动尝试 YouTube 中文译轨。</p>
       <div id="azureFields" class="hidden">
         <label for="azureKey">微软翻译密钥</label><input id="azureKey" type="password" autocomplete="off">
         <label for="azureRegion">Azure 资源区域</label><input id="azureRegion" type="text" placeholder="例如 eastasia，Global 可留空" autocomplete="off">
         <label class="check"><input id="azureFallback" type="checkbox"><span>Google 请求失败时，允许使用我的微软翻译额度</span></label>
         <p class="muted small">需要在 Azure 创建 Translator 资源并选择 F0 免费档。使用微软翻译时，待译字幕发往微软。密钥只保存在本机扩展存储。<a href="https://learn.microsoft.com/azure/ai-services/translator/quickstart-translator" target="_blank" rel="noopener noreferrer">微软配置指南</a></p>
+      </div>
+      <div id="bingFields" class="hidden">
+        <p class="muted small">无需 Azure 密钥。保存设置后，打开并保留扩展的 Bing 翻译标签页，再切回 YouTube。待译字幕会填入该网页，请用另一个标签页做手动翻译。Bing 要求验证时，请先在该页手动完成，再回到播放器点「恢复 / 重试」。</p>
+        <button id="openBing" type="button">打开 Bing 翻译页</button>
+        <div id="bingMessage" class="message small" role="status"></div>
       </div>
       <div id="aliyunFields" class="hidden">
         <label for="aliyunAccessKeyId">阿里云 AccessKey ID</label><input id="aliyunAccessKeyId" type="text" maxlength="128" autocomplete="off" spellcheck="false">

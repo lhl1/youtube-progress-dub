@@ -422,6 +422,11 @@
     if (m.type === 'STOP_OTHER_TAB') { stop(); report('已在另一个视频开启同传，本页朗读已停止'); respond({ok: true}); return; }
     if (m.type === 'TOGGLE') { if (active) stop(); else start(); respond({active}); return; }
     if (m.type === 'RETRY') {
+      if (settings.provider === 'bing') {
+        retryBing().catch(e => report(e.message));
+        respond({ok: true});
+        return;
+      }
       retryAt = 0; speechRetryAt = 0; voiceNeedsGesture = false; scheduler.failures.clear(); scheduler.cooldownUntil = 0; errorText = ''; speech.stop(); speech.failedVoices.clear(); lastSpoken = '';
       if (!scheduler.cues.length || sourceName.startsWith('当前屏幕')) loadCaptions(true).catch(e => report(e.message));
       tick(); respond({ok: true}); return;
@@ -433,6 +438,17 @@
     }
     if (m.type === 'SETTINGS_CHANGED') applySettings(m.settings);
   });
+  async function retryBing() {
+    await rpc({type: 'RESUME_BING_TRANSLATOR'});
+    scheduler.failures.clear();
+    scheduler.cooldownUntil = 0;
+    errorText = '';
+    if (!active) await start();
+    else {
+      if (!scheduler.cues.length) await loadCaptions(true);
+      tick();
+    }
+  }
   window.addEventListener('message', event => {
     const m = event.data;
     if (event.source !== window || event.origin !== location.origin || m?.channel !== CHANNEL || m.direction !== 'from-page') return;
@@ -465,6 +481,10 @@
       getVoices: () => speech.voices(),
       onToggle: () => active ? stop() : start(),
       onRetry: () => {
+        if (settings.provider === 'bing') {
+          retryBing().catch(e => report(e.message));
+          return;
+        }
         retryAt = 0; speechRetryAt = 0; voiceNeedsGesture = false; scheduler.failures.clear(); scheduler.cooldownUntil = 0;
         speech.stop(); speech.failedVoices.clear(); lastSpoken = ''; errorText = '';
         if (!active) start(); else { if (!scheduler.cues.length || sourceName.startsWith('当前屏幕')) loadCaptions(true).catch(e => report(e.message)); tick(); }
